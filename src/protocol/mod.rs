@@ -284,18 +284,44 @@ fn decode_attribute<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
 }
 
 fn decode_verbatim<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
-    let line = read_line_bytes(reader)?;
-    let colon_index = line.iter().position(|&b| b == b':').ok_or_else(|| {
-        io::Error::new(
+    let length_line = read_line(reader)?;
+    let total_length = parse_length(&length_line)?;
+    if total_length < 0 {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "missing verbatim format delimiter",
-        )
-    })?;
+            "verbatim length must be non-negative",
+        ));
+    }
 
-    let format_bytes = &line[..colon_index];
-    let payload = line[colon_index + 1..].to_vec();
+    let total_length = ensure_bulk_length(total_length)?;
+    if total_length < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "verbatim payload too short",
+        ));
+    }
+
+    let mut buffer = vec![0u8; total_length];
+    reader.read_exact(&mut buffer)?;
+    let mut crlf = [0u8; 2];
+    reader.read_exact(&mut crlf)?;
+    if crlf != [b'\r', b'\n'] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing CRLF after verbatim payload",
+        ));
+    }
+
+    let format_bytes = &buffer[..3];
+    if buffer[3] != b':' {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing colon after verbatim format",
+        ));
+    }
 
     let format = String::from_utf8_lossy(format_bytes).to_string();
+    let payload = buffer[4..].to_vec();
 
     Ok(Frame::VerbatimString { format, payload })
 }
@@ -415,7 +441,18 @@ pub fn encode_frame<W: Write>(
             ));
         }
         (Frame::VerbatimString { format, payload }, ProtocolVersion::Resp3) => {
-            write!(writer, "={}:", format)?;
+            let format_bytes = format.as_bytes();
+            if format_bytes.len() != 3 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "verbatim format tag must be exactly 3 bytes",
+                ));
+            }
+
+            let total_length = format_bytes.len() + 1 + payload.len();
+            write!(writer, "={}\r\n", total_length)?;
+            writer.write_all(format_bytes)?;
+            writer.write_all(b":")?;
             writer.write_all(payload)?;
             writer.write_all(b"\r\n")?;
         }
@@ -485,7 +522,7 @@ mod tests {
 
     #[test]
     fn parse_verbatim_frame() {
-        let mut reader = Cursor::new(b"=txt:hello\r\n");
+        let mut reader = Cursor::new(b"=9\r\ntxt:hello\r\n");
         let frame = decode_frame(&mut reader).unwrap();
         assert!(
             matches!(frame, Frame::VerbatimString { format, payload } if format == "txt" && payload == b"hello")
@@ -518,5 +555,160 @@ mod tests {
         let mut reader = Cursor::new(b"(12345678901234567890\r\n");
         let frame = decode_frame(&mut reader).unwrap();
         assert!(matches!(frame, Frame::BigNumber(value) if value == "12345678901234567890"));
+    }
+
+    #[test]
+    fn verbatim_round_trip() {
+        let frame = Frame::VerbatimString {
+            format: "txt".into(),
+            payload: b"Some string".to_vec(),
+        };
+        let mut buffer = Vec::new();
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"=15\r\ntxt:Some string\r\n");
+
+        let mut reader = Cursor::new(buffer);
+        let decoded = decode_frame(&mut reader).unwrap();
+        assert!(
+            matches!(decoded, Frame::VerbatimString { format, payload } if format == "txt" && payload == b"Some string")
+        );
+    }
+
+    #[test]
+    fn encode_map_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Map(Some(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]));
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"%1\r\n+foo\r\n+bar\r\n");
+    }
+
+    #[test]
+    fn encode_null_map_resp3() {
+        let mut buffer = Vec::new();
+        encode_frame(&Frame::Map(None), ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"%-1\r\n");
+    }
+
+    #[test]
+    fn encode_map_requires_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Map(Some(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]));
+        assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn encode_set_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Set(Some(vec![
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        ]));
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"~2\r\n+foo\r\n+bar\r\n");
+    }
+
+    #[test]
+    fn encode_null_set_resp3() {
+        let mut buffer = Vec::new();
+        encode_frame(&Frame::Set(None), ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"~-1\r\n");
+    }
+
+    #[test]
+    fn encode_set_requires_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Set(Some(vec![Frame::SimpleString("foo".into())]));
+        assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn encode_attribute_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Attribute(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]);
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"|1\r\n+foo\r\n+bar\r\n");
+    }
+
+    #[test]
+    fn attribute_requires_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Attribute(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]);
+        assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn encode_push_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Push(vec![
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        ]);
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b">2\r\n+foo\r\n+bar\r\n");
+    }
+
+    #[test]
+    fn push_requires_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::Push(vec![Frame::SimpleString("foo".into())]);
+        assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn encode_bignum_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::BigNumber("1234567890".into());
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"(1234567890\r\n");
+    }
+
+    #[test]
+    fn bignum_requires_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::BigNumber("123".into());
+        assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn parse_null_set_frame() {
+        let mut reader = Cursor::new(b"~-1\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Set(None)));
+    }
+
+    #[test]
+    fn reject_negative_map_length() {
+        let mut reader = Cursor::new(b"%-2\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_negative_set_length() {
+        let mut reader = Cursor::new(b"~-2\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_negative_attribute_length() {
+        let mut reader = Cursor::new(b"|-1\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_negative_push_length() {
+        let mut reader = Cursor::new(b">-1\r\n");
+        assert!(decode_frame(&mut reader).is_err());
     }
 }

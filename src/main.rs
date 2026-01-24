@@ -1,8 +1,3 @@
-mod command;
-mod protocol;
-mod server;
-mod storage;
-
 use std::process;
 
 use env_logger::Env;
@@ -17,9 +12,5 @@ fn main() {
 }
 
 fn run() -> anyhow::Result<()> {
-    let config = server::Config::from_env();
-    let storage = storage::Storage::new();
-
-    let server = server::Server::new(config, storage);
-    server.run()
+    ralphdb::run()
 }

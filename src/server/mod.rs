@@ -60,9 +60,14 @@ impl Server {
 
     pub fn run(&self) -> anyhow::Result<()> {
         let listener = TcpListener::bind(self.config.address())?;
+        self.serve(listener)
+    }
+
+    pub fn serve(&self, listener: TcpListener) -> anyhow::Result<()> {
+        let address = listener.local_addr()?.to_string();
         log::info!(
             "ralphdb listening on {} (threads={})",
-            self.config.address(),
+            address,
             self.config.threads
         );
 
@@ -88,7 +93,7 @@ impl Server {
         Ok(())
     }
 
-    fn handle_connection(stream: TcpStream, storage: Arc<Storage>) -> anyhow::Result<()> {
+    pub fn handle_connection(stream: TcpStream, storage: Arc<Storage>) -> anyhow::Result<()> {
         let peer = stream
             .peer_addr()
             .map(|addr| addr.to_string())

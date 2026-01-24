@@ -1,5 +1,5 @@
 # Next Steps
-- Decide on a RESP3-safe `CLIENT LIST` reply shape (attributes must precede a reply); either return a map/array response and optionally send a push, or add protocol support for attribute + reply frames.
-- Add integration coverage for `CLIENT ID` (RESP2 + RESP3) and `CLIENT LIST` in RESP2 mode to confirm encodings and null handling stay consistent.
-- Extend `CONFIG GET` tests for non-matching patterns (empty array) and exact key lookup (e.g., `server.name`) in both RESP2 and RESP3 modes.
-- Document the exact `CONFIG GET` key list in `README.md` (with a stable ordering) so users know what `redis-benchmark` consumes.
+- Run `cargo test` and `cargo clippy -- -D warnings` to validate the RESP3 attribute response path changes.
+- Add a unit test to ensure `encode_response` drops attributes for RESP2 sessions and only emits them for RESP3.
+- Decide whether RESP3 `CLIENT LIST` should expand its metadata (addr, flags, etc.) beyond `id`, `name`, and `protocol`, and document any additions in `README.md`.
+- Refresh the `README.md` benchmark numbers with fresh `redis-benchmark` runs once the above stabilizes.

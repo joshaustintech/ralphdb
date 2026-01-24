@@ -131,10 +131,20 @@ impl Server {
             };
 
             let result = command::execute(&command, &storage, &mut state);
-            protocol::encode_frame(&result.response, state.protocol, &mut writer)?;
+            let command::CommandResult {
+                response,
+                attributes,
+                close,
+            } = result;
+            protocol::encode_response(
+                &response,
+                attributes.as_ref().map(|attrs| attrs.as_slice()),
+                state.protocol,
+                &mut writer,
+            )?;
             writer.flush()?;
 
-            if result.close {
+            if close {
                 log::info!("{} commanded QUIT", peer);
                 break;
             }

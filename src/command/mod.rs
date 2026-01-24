@@ -98,6 +98,7 @@ impl Default for ConnectionState {
 
 pub struct CommandResult {
     pub response: Frame,
+    pub attributes: Option<Vec<(Frame, Frame)>>,
     pub close: bool,
 }
 
@@ -105,6 +106,15 @@ impl CommandResult {
     fn ok(response: Frame) -> Self {
         Self {
             response,
+            attributes: None,
+            close: false,
+        }
+    }
+
+    fn with_attributes(response: Frame, attributes: Vec<(Frame, Frame)>) -> Self {
+        Self {
+            response,
+            attributes: Some(attributes),
             close: false,
         }
     }
@@ -112,6 +122,7 @@ impl CommandResult {
     fn error(message: &str) -> Self {
         Self {
             response: Frame::Error(message.to_string()),
+            attributes: None,
             close: false,
         }
     }
@@ -127,6 +138,7 @@ pub fn execute(command: &Command, storage: &Storage, state: &mut ConnectionState
         "CLIENT" => client(&command.args, state),
         "QUIT" => CommandResult {
             response: Frame::SimpleString("OK".into()),
+            attributes: None,
             close: true,
         },
         "SET" => set(&command.args, storage),
@@ -355,6 +367,7 @@ fn info(args: &[Vec<u8>]) -> CommandResult {
         }
         other => CommandResult {
             response: Frame::Error(format!("ERR unsupported INFO section '{other}'")),
+            attributes: None,
             close: false,
         },
     }
@@ -410,15 +423,12 @@ fn client_list(args: &[Vec<u8>], state: &ConnectionState) -> CommandResult {
         return CommandResult::error("ERR wrong number of arguments for 'client list'");
     }
 
+    let summary = client_list_summary(state);
+
     if state.protocol == ProtocolVersion::Resp3 {
         let name_frame = match &state.client_name {
             Some(name) => Frame::BulkString(Some(name.clone())),
             None => Frame::Null,
-        };
-
-        let protocol_name = match state.protocol {
-            ProtocolVersion::Resp3 => "RESP3",
-            ProtocolVersion::Resp2 => "RESP2",
         };
 
         let client_map = vec![
@@ -429,26 +439,34 @@ fn client_list(args: &[Vec<u8>], state: &ConnectionState) -> CommandResult {
             (Frame::SimpleString("name".into()), name_frame),
             (
                 Frame::SimpleString("protocol".into()),
-                Frame::SimpleString(protocol_name.into()),
+                Frame::SimpleString("RESP3".into()),
             ),
         ];
 
-        let attribute = Frame::Attribute(vec![(
+        let attribute = vec![(
             Frame::SimpleString("client".into()),
             Frame::Push(vec![Frame::Map(Some(client_map))]),
-        )]);
+        )];
 
-        CommandResult::ok(attribute)
+        CommandResult::with_attributes(Frame::SimpleString(summary), attribute)
     } else {
-        let mut summary = format!("id={}", state.client_id);
-        if let Some(name) = &state.client_name {
-            summary.push_str(&format!(" name={}", String::from_utf8_lossy(name)));
-        } else {
-            summary.push_str(" name=(null)");
-        }
-        summary.push_str(" protocol=RESP2");
         CommandResult::ok(Frame::SimpleString(summary))
     }
+}
+
+fn client_list_summary(state: &ConnectionState) -> String {
+    let mut summary = format!("id={}", state.client_id);
+    if let Some(name) = &state.client_name {
+        summary.push_str(&format!(" name={}", String::from_utf8_lossy(name)));
+    } else {
+        summary.push_str(" name=(null)");
+    }
+    let proto_string = match state.protocol {
+        ProtocolVersion::Resp3 => "RESP3",
+        ProtocolVersion::Resp2 => "RESP2",
+    };
+    summary.push_str(&format!(" protocol={proto_string}"));
+    summary
 }
 
 fn config(args: &[Vec<u8>]) -> CommandResult {
@@ -927,38 +945,36 @@ mod tests {
         let client_id_value = state.client_id;
 
         let result = client_list(&[], &state);
-        if let Frame::Attribute(attributes) = result.response {
-            assert_eq!(attributes.len(), 1);
-            let (key, value) = &attributes[0];
-            assert!(matches!(key, Frame::SimpleString(name) if name == "client"));
-            if let Frame::Push(elements) = value {
-                assert_eq!(elements.len(), 1);
-                if let Frame::Map(Some(entries)) = &elements[0] {
-                    let mut saw_id = false;
-                    let mut saw_name = false;
-                    for (entry_key, entry_value) in entries {
-                        if let Frame::SimpleString(entry_key) = entry_key {
-                            match (entry_key.as_str(), entry_value) {
-                                ("id", Frame::Integer(value)) if *value == client_id_value => {
-                                    saw_id = true;
-                                }
-                                ("name", Frame::BulkString(Some(bytes))) if bytes == b"ralph" => {
-                                    saw_name = true;
-                                }
-                                _ => {}
+        assert!(matches!(result.response, Frame::SimpleString(ref summary) if summary.contains("protocol=RESP3")));
+        let attributes = result.attributes.expect("RESP3 CLIENT LIST should include attributes");
+        assert_eq!(attributes.len(), 1);
+        let (key, value) = &attributes[0];
+        assert!(matches!(key, Frame::SimpleString(name) if name == "client"));
+        if let Frame::Push(elements) = value {
+            assert_eq!(elements.len(), 1);
+            if let Frame::Map(Some(entries)) = &elements[0] {
+                let mut saw_id = false;
+                let mut saw_name = false;
+                for (entry_key, entry_value) in entries {
+                    if let Frame::SimpleString(entry_key) = entry_key {
+                        match (entry_key.as_str(), entry_value) {
+                            ("id", Frame::Integer(value)) if *value == client_id_value => {
+                                saw_id = true;
                             }
+                            ("name", Frame::BulkString(Some(bytes))) if bytes == b"ralph" => {
+                                saw_name = true;
+                            }
+                            _ => {}
                         }
                     }
-                    assert!(saw_id);
-                    assert!(saw_name);
-                } else {
-                    panic!("CLIENT LIST push element should be a map");
                 }
+                assert!(saw_id);
+                assert!(saw_name);
             } else {
-                panic!("CLIENT LIST attribute should hold a push frame");
+                panic!("CLIENT LIST push element should be a map");
             }
         } else {
-            panic!("CLIENT LIST RESP3 should return an attribute frame");
+            panic!("CLIENT LIST attribute should hold a push frame");
         }
     }
 
@@ -969,6 +985,7 @@ mod tests {
         state.client_name = None;
 
         let result = client_list(&[], &state);
+        assert!(result.attributes.is_none());
         if let Frame::SimpleString(text) = result.response {
             assert!(text.contains("id="));
             assert!(text.contains("name=(null)"));

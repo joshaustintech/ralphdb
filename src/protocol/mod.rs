@@ -475,6 +475,20 @@ pub fn encode_frame<W: Write>(
     Ok(())
 }
 
+pub fn encode_response<W: Write>(
+    frame: &Frame,
+    attributes: Option<&[(Frame, Frame)]>,
+    version: ProtocolVersion,
+    writer: &mut W,
+) -> io::Result<()> {
+    if let ProtocolVersion::Resp3 = version {
+        if let Some(attributes) = attributes {
+            encode_frame(&Frame::Attribute(attributes.to_vec()), version, writer)?;
+        }
+    }
+    encode_frame(frame, version, writer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +811,28 @@ mod tests {
         let mut buffer = Vec::new();
         encode_frame(&Frame::Null, ProtocolVersion::Resp3, &mut buffer).unwrap();
         assert_eq!(buffer, b"_\r\n");
+    }
+
+    #[test]
+    fn encode_response_emits_attributes_before_payload() {
+        let attributes = vec![(
+            Frame::SimpleString("meta".into()),
+            Frame::SimpleString("value".into()),
+        )];
+        let mut buffer = Vec::new();
+        encode_response(
+            &Frame::SimpleString("OK".into()),
+            Some(&attributes),
+            ProtocolVersion::Resp3,
+            &mut buffer,
+        )
+        .unwrap();
+
+        let mut reader = Cursor::new(buffer);
+        let first_frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(first_frame, Frame::Attribute(_)));
+        let second_frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(second_frame, Frame::SimpleString(ref value) if value == "OK"));
     }
 
     #[test]

@@ -59,8 +59,8 @@ redis-cli -p 6379 INFO
 - RESP3 parsing now understands maps, sets, attributes, push frames, verbatim strings, and big numbers and enforces payload/collection caps to avoid DoS injections.
 - Configurable thread pool via `RALPHDB_THREADS` for multi-core command handling.
 - Optional command: `INFO [section]` returns server metadata text (currently `server`/`default`) in both RESP2/RESP3 modes.
-- `CONFIG GET <pattern>` exposes a small documented key set (server name, version, bind, port, threads) and understands simple wildcard patterns such as `server.*`.
-- `CLIENT SETNAME` stores a per-connection name and `CLIENT GETNAME` returns that value (null if unset); both subcommands work for RESP2 and RESP3 sessions. `CLIENT ID` returns the numeric connection identifier while `CLIENT LIST` emits RESP3 attributes/push frames describing the caller so metadata is observable in one frame.
+- `CONFIG GET <pattern>` exposes a documented key set (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) in that stable order and understands simple wildcard patterns such as `server.*`; unmatched patterns now return an empty array.
+- `CLIENT SETNAME` stores a per-connection name and `CLIENT GETNAME` returns that value (null if unset); both subcommands work for RESP2 and RESP3 sessions. `CLIENT ID` returns the numeric connection identifier while `CLIENT LIST` emits a RESP3 attribute (`client` → push → map with `id`, `name`, `protocol`) that is sent before the legacy summary string so metadata precedes the payload consumers read; RESP2 clients still receive the traditional bulk-string summary.
 - RESP3 scalar arguments (booleans, doubles, big numbers, and verbatim strings) are coerced into byte arrays after `HELLO 3`, so existing commands accept them without special handling.
 
 ### INFO command

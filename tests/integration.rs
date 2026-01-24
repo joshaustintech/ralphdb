@@ -513,8 +513,8 @@ fn client_list_produces_attribute_push_integration() -> Result<()> {
     assert!(matches!(set_response, Frame::SimpleString(ref value) if value == "OK"));
 
     send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"LIST")])?;
-    let list_response = read_frame(&mut reader)?;
-    if let Frame::Attribute(attributes) = list_response {
+    let attribute_frame = read_frame(&mut reader)?;
+    if let Frame::Attribute(attributes) = attribute_frame {
         assert_eq!(attributes.len(), 1);
         let (_, value) = &attributes[0];
         if let Frame::Push(elements) = value {
@@ -542,6 +542,198 @@ fn client_list_produces_attribute_push_integration() -> Result<()> {
     } else {
         panic!("CLIENT LIST RESP3 should return attributes");
     }
+
+    let summary_frame = read_frame(&mut reader)?;
+    if let Frame::SimpleString(summary) = summary_frame {
+        assert!(summary.contains("protocol=RESP3"));
+        assert!(summary.contains("name=integration"));
+    } else {
+        panic!("CLIENT LIST RESP3 should send a summary string after attributes");
+    }
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn client_list_resp2_summary_integration() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"LIST")])?;
+    if let Frame::SimpleString(summary) = read_frame(&mut reader)? {
+        assert!(summary.contains("protocol=RESP2"));
+        assert!(summary.contains("name=(null)"));
+    } else {
+        panic!("RESP2 CLIENT LIST should return a summary string");
+    }
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"CLIENT"), bulk(b"SETNAME"), bulk(b"resp2-client")],
+    )?;
+    let set_response = read_frame(&mut reader)?;
+    assert!(matches!(set_response, Frame::SimpleString(ref value) if value == "OK"));
+
+    send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"LIST")])?;
+    if let Frame::SimpleString(summary) = read_frame(&mut reader)? {
+        assert!(summary.contains("protocol=RESP2"));
+        assert!(summary.contains("name=resp2-client"));
+    } else {
+        panic!("RESP2 CLIENT LIST should return a summary string");
+    }
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn client_id_stable_and_monotonic() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept()?;
+            Server::handle_connection(stream, server_storage.clone())?;
+        }
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"ID")])?;
+    let first_id_frame = read_frame(&mut reader)?;
+    let first_id = if let Frame::Integer(value) = first_id_frame {
+        value
+    } else {
+        panic!("CLIENT ID should return integer");
+    };
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"ID")])?;
+    let second_id_frame = read_frame(&mut reader)?;
+    let second_id = if let Frame::Integer(value) = second_id_frame {
+        value
+    } else {
+        panic!("CLIENT ID should return integer");
+    };
+    assert_eq!(second_id, first_id);
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    send_array(&mut writer, vec![bulk(b"CLIENT"), bulk(b"ID")])?;
+    let third_id_frame = read_frame(&mut reader)?;
+    let third_id = if let Frame::Integer(value) = third_id_frame {
+        value
+    } else {
+        panic!("CLIENT ID should return integer");
+    };
+    assert!(third_id > first_id);
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn config_get_exact_key_and_nonmatching_patterns() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    let check = |frame: Frame, expect_key: Option<&'static str>| {
+        if let Frame::Array(Some(elements)) = frame {
+            if let Some(expected) = expect_key {
+                assert_eq!(elements.len(), 2);
+                if let Frame::BulkString(Some(key_bytes)) = &elements[0] {
+                    assert_eq!(expected, String::from_utf8_lossy(key_bytes));
+                } else {
+                    panic!("CONFIG GET key should be bulk string");
+                }
+                if let Frame::BulkString(Some(value_bytes)) = &elements[1] {
+                    assert!(!value_bytes.is_empty());
+                } else {
+                    panic!("CONFIG GET value should be bulk string");
+                }
+            } else {
+                assert!(elements.is_empty());
+            }
+        } else {
+            panic!("CONFIG GET should return array");
+        }
+    };
+
+    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")])?;
+    let response = read_frame(&mut reader)?;
+    check(response, Some("server.name"));
+
+    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")])?;
+    let response = read_frame(&mut reader)?;
+    check(response, None);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")])?;
+    let response = read_frame(&mut reader)?;
+    check(response, Some("server.name"));
+
+    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")])?;
+    let response = read_frame(&mut reader)?;
+    check(response, None);
 
     send_array(&mut writer, vec![bulk(b"QUIT")])?;
     let quit_frame = read_frame(&mut reader)?;

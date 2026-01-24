@@ -171,7 +171,7 @@ fn echo(args: &[Vec<u8>]) -> CommandResult {
 }
 
 fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
-    let version = if let Some(version_value) = args.get(0) {
+    let version = if let Some(version_value) = args.first() {
         std::str::from_utf8(version_value)
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
@@ -304,7 +304,7 @@ fn mset(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
         return CommandResult::error("ERR wrong number of arguments for 'mset'");
     }
 
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return CommandResult::error("ERR wrong number of arguments for 'mset'");
     }
 
@@ -351,7 +351,7 @@ fn info(args: &[Vec<u8>]) -> CommandResult {
     }
 
     let section = args
-        .get(0)
+        .first()
         .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_lowercase())
         .unwrap_or_else(|| "default".into());
 
@@ -533,11 +533,9 @@ fn matches_pattern(pattern: &str, key: &str) -> bool {
     } else if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 1 {
         let inner = &pattern[1..pattern.len() - 1];
         key.contains(inner)
-    } else if pattern.starts_with('*') {
-        let suffix = &pattern[1..];
+    } else if let Some(suffix) = pattern.strip_prefix('*') {
         key.ends_with(suffix)
-    } else if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
+    } else if let Some(prefix) = pattern.strip_suffix('*') {
         key.starts_with(prefix)
     } else {
         key == pattern
@@ -945,8 +943,12 @@ mod tests {
         let client_id_value = state.client_id;
 
         let result = client_list(&[], &state);
-        assert!(matches!(result.response, Frame::SimpleString(ref summary) if summary.contains("protocol=RESP3")));
-        let attributes = result.attributes.expect("RESP3 CLIENT LIST should include attributes");
+        assert!(
+            matches!(result.response, Frame::SimpleString(ref summary) if summary.contains("protocol=RESP3"))
+        );
+        let attributes = result
+            .attributes
+            .expect("RESP3 CLIENT LIST should include attributes");
         assert_eq!(attributes.len(), 1);
         let (key, value) = &attributes[0];
         assert!(matches!(key, Frame::SimpleString(name) if name == "client"));

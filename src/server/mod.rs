@@ -138,7 +138,7 @@ impl Server {
             } = result;
             protocol::encode_response(
                 &response,
-                attributes.as_ref().map(|attrs| attrs.as_slice()),
+                attributes.as_deref(),
                 state.protocol,
                 &mut writer,
             )?;

@@ -4,16 +4,11 @@ use std::str::FromStr;
 const MAX_BULK_SIZE: i64 = 32 * 1024 * 1024; // 32 MiB per bulk string
 const MAX_COLLECTION_SIZE: i64 = 1_000_000; // 1 million entries per collection
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum ProtocolVersion {
+    #[default]
     Resp2,
     Resp3,
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        Self::Resp2
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -481,10 +476,10 @@ pub fn encode_response<W: Write>(
     version: ProtocolVersion,
     writer: &mut W,
 ) -> io::Result<()> {
-    if let ProtocolVersion::Resp3 = version {
-        if let Some(attributes) = attributes {
-            encode_frame(&Frame::Attribute(attributes.to_vec()), version, writer)?;
-        }
+    if let ProtocolVersion::Resp3 = version
+        && let Some(attributes) = attributes
+    {
+        encode_frame(&Frame::Attribute(attributes.to_vec()), version, writer)?;
     }
     encode_frame(frame, version, writer)
 }

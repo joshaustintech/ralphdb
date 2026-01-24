@@ -715,11 +715,17 @@ fn config_get_exact_key_and_nonmatching_patterns() -> Result<()> {
         }
     };
 
-    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")])?;
+    send_array(
+        &mut writer,
+        vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")],
+    )?;
     let response = read_frame(&mut reader)?;
     check(response, Some("server.name"));
 
-    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")])?;
+    send_array(
+        &mut writer,
+        vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")],
+    )?;
     let response = read_frame(&mut reader)?;
     check(response, None);
 
@@ -727,11 +733,17 @@ fn config_get_exact_key_and_nonmatching_patterns() -> Result<()> {
     let hello_frame = read_frame(&mut reader)?;
     assert_hello3_map(hello_frame);
 
-    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")])?;
+    send_array(
+        &mut writer,
+        vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.name")],
+    )?;
     let response = read_frame(&mut reader)?;
     check(response, Some("server.name"));
 
-    send_array(&mut writer, vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")])?;
+    send_array(
+        &mut writer,
+        vec![bulk(b"CONFIG"), bulk(b"GET"), bulk(b"server.unknown")],
+    )?;
     let response = read_frame(&mut reader)?;
     check(response, None);
 

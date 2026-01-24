@@ -91,6 +91,7 @@ pub fn execute(command: &Command, storage: &Storage, state: &mut ConnectionState
         "PING" => ping(&command.args),
         "ECHO" => echo(&command.args),
         "HELLO" => hello(&command.args, state),
+        "INFO" => info(&command.args),
         "QUIT" => CommandResult {
             response: Frame::SimpleString("OK".into()),
             close: true,
@@ -146,9 +147,22 @@ fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
                     Frame::SimpleString("version".into()),
                     Frame::SimpleString(env!("CARGO_PKG_VERSION").into()),
                 ),
+                (Frame::SimpleString("proto".into()), Frame::Integer(3)),
                 (
-                    Frame::SimpleString("proto".into()),
-                    Frame::Integer(3),
+                    Frame::SimpleString("id".into()),
+                    Frame::SimpleString(env!("CARGO_PKG_NAME").into()),
+                ),
+                (
+                    Frame::SimpleString("mode".into()),
+                    Frame::SimpleString("standalone".into()),
+                ),
+                (
+                    Frame::SimpleString("role".into()),
+                    Frame::SimpleString("primary".into()),
+                ),
+                (
+                    Frame::SimpleString("modules".into()),
+                    Frame::Array(Some(vec![])),
                 ),
             ]));
             CommandResult::ok(payload)
@@ -286,6 +300,33 @@ fn ttl(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
     CommandResult::ok(Frame::Integer(value))
 }
 
+fn info(args: &[Vec<u8>]) -> CommandResult {
+    if args.len() > 1 {
+        return CommandResult::error("ERR wrong number of arguments for 'info'");
+    }
+
+    let section = args
+        .get(0)
+        .map(|bytes| String::from_utf8_lossy(bytes).to_ascii_lowercase())
+        .unwrap_or_else(|| "default".into());
+
+    match section.as_str() {
+        "default" | "server" => {
+            let version = env!("CARGO_PKG_VERSION");
+            let server_id = env!("CARGO_PKG_NAME");
+            let body = format!(
+                "# Server\r\nralphdb_version:{}\r\nralphdb_mode:standalone\r\nralphdb_role:primary\r\nralphdb_id:{}\r\n",
+                version, server_id
+            );
+            CommandResult::ok(Frame::BulkString(Some(body.into_bytes())))
+        }
+        other => CommandResult {
+            response: Frame::Error(format!("ERR unsupported INFO section '{other}'")),
+            close: false,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,71 +366,100 @@ mod tests {
         assert!(matches!(result.response, Frame::BulkString(Some(ref value)) if value == b"5"));
     }
 
-#[test]
-fn hello_sets_resp3() {
-    let storage = Storage::new();
-    let mut state = ConnectionState::default();
-    assert_eq!(state.protocol, ProtocolVersion::Resp2);
+    #[test]
+    fn hello_sets_resp3() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
 
-    let hello_cmd = Command {
-        name: "HELLO".into(),
-        args: vec![b"3".to_vec()],
-    };
-    let result = execute(&hello_cmd, &storage, &mut state);
-    assert_eq!(state.protocol, ProtocolVersion::Resp3);
-    if let Frame::Map(Some(entries)) = result.response {
-        assert_eq!(entries.len(), 3);
-        let mut has_server = false;
-        let mut has_version = false;
-        let mut has_proto = false;
-        for (key, value) in entries {
-            match (key, value) {
-                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "server" => {
-                    assert_eq!(value, "ralphdb");
-                    has_server = true;
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![b"3".to_vec()],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+        assert_eq!(state.protocol, ProtocolVersion::Resp3);
+        if let Frame::Map(Some(entries)) = result.response {
+            let mut has_server = false;
+            let mut has_version = false;
+            let mut has_proto = false;
+            let mut has_id = false;
+            let mut has_mode = false;
+            let mut has_role = false;
+            let mut has_modules = false;
+            for (key, value) in entries {
+                match (key, value) {
+                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "server" => {
+                        assert_eq!(value, "ralphdb");
+                        has_server = true;
+                    }
+                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "version" => {
+                        assert_eq!(value, env!("CARGO_PKG_VERSION"));
+                        has_version = true;
+                    }
+                    (Frame::SimpleString(key), Frame::Integer(value)) if key == "proto" => {
+                        assert_eq!(value, 3);
+                        has_proto = true;
+                    }
+                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "id" => {
+                        assert_eq!(value, env!("CARGO_PKG_NAME"));
+                        has_id = true;
+                    }
+                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "mode" => {
+                        assert_eq!(value, "standalone");
+                        has_mode = true;
+                    }
+                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "role" => {
+                        assert_eq!(value, "primary");
+                        has_role = true;
+                    }
+                    (Frame::SimpleString(key), Frame::Array(Some(elements)))
+                        if key == "modules" =>
+                    {
+                        assert!(elements.is_empty());
+                        has_modules = true;
+                    }
+                    _ => continue,
                 }
-                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "version" => {
-                    assert_eq!(value, env!("CARGO_PKG_VERSION"));
-                    has_version = true;
-                }
-                (Frame::SimpleString(key), Frame::Integer(value)) if key == "proto" => {
-                    assert_eq!(value, 3);
-                    has_proto = true;
-                }
-                _ => continue,
             }
+            assert!(
+                has_server
+                    && has_version
+                    && has_proto
+                    && has_id
+                    && has_mode
+                    && has_role
+                    && has_modules
+            );
+        } else {
+            panic!("HELLO 3 response should be a map");
         }
-        assert!(has_server && has_version && has_proto);
-    } else {
-        panic!("HELLO 3 response should be a map");
     }
-}
 
-#[test]
-fn hello_defaults_to_resp2() {
-    let storage = Storage::new();
-    let mut state = ConnectionState::default();
-    let hello_cmd = Command {
-        name: "HELLO".into(),
-        args: vec![],
-    };
-    let result = execute(&hello_cmd, &storage, &mut state);
-    assert_eq!(state.protocol, ProtocolVersion::Resp2);
-    assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
-}
+    #[test]
+    fn hello_defaults_to_resp2() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
+        assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+    }
 
-#[test]
-fn hello_version_two_stays_resp2() {
-    let storage = Storage::new();
-    let mut state = ConnectionState::default();
-    let hello_cmd = Command {
-        name: "HELLO".into(),
-        args: vec![b"2".to_vec()],
-    };
-    let result = execute(&hello_cmd, &storage, &mut state);
-    assert_eq!(state.protocol, ProtocolVersion::Resp2);
-    assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
-}
+    #[test]
+    fn hello_version_two_stays_resp2() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![b"2".to_vec()],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
+        assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+    }
 
     #[test]
     fn ping_errors_with_extra_args() {
@@ -433,5 +503,49 @@ fn hello_version_two_stays_resp2() {
         };
         let result = execute(&expire_cmd, &storage, &mut state);
         assert!(matches!(result.response, Frame::Integer(0)));
+    }
+
+    #[test]
+    fn info_returns_server_metadata() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let info_cmd = Command {
+            name: "INFO".into(),
+            args: vec![],
+        };
+        let result = execute(&info_cmd, &storage, &mut state);
+        if let Frame::BulkString(Some(bytes)) = result.response {
+            let text = String::from_utf8(bytes).unwrap();
+            assert!(text.contains("ralphdb_version"));
+            assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        } else {
+            panic!("INFO should return a bulk string");
+        }
+    }
+
+    #[test]
+    fn info_rejects_extra_arguments() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let info_cmd = Command {
+            name: "INFO".into(),
+            args: vec![b"server".to_vec(), b"extra".to_vec()],
+        };
+        let result = execute(&info_cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Error(_)));
+    }
+
+    #[test]
+    fn info_rejects_unknown_section() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let info_cmd = Command {
+            name: "INFO".into(),
+            args: vec![b"unknown".to_vec()],
+        };
+        let result = execute(&info_cmd, &storage, &mut state);
+        assert!(
+            matches!(result.response, Frame::Error(ref message) if message.contains("unsupported INFO section"))
+        );
     }
 }

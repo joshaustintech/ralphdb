@@ -480,6 +480,13 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    fn pseudo_random_u64(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state
+    }
+
     #[test]
     fn parse_simple_string() {
         let mut reader = Cursor::new(b"+OK\r\n");
@@ -520,32 +527,32 @@ mod tests {
         assert!(matches!(frame, Frame::Map(Some(entries)) if entries.len() == 1));
     }
 
-#[test]
-fn parse_verbatim_frame() {
-    let mut reader = Cursor::new(b"=9\r\ntxt:hello\r\n");
-    let frame = decode_frame(&mut reader).unwrap();
-    assert!(
-        matches!(frame, Frame::VerbatimString { format, payload } if format == "txt" && payload == b"hello")
-    );
-}
+    #[test]
+    fn parse_verbatim_frame() {
+        let mut reader = Cursor::new(b"=9\r\ntxt:hello\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(
+            matches!(frame, Frame::VerbatimString { format, payload } if format == "txt" && payload == b"hello")
+        );
+    }
 
-#[test]
-fn reject_verbatim_frame_too_short() {
-    let mut reader = Cursor::new(b"=3\r\ntxt\r\n");
-    assert!(decode_frame(&mut reader).is_err());
-}
+    #[test]
+    fn reject_verbatim_frame_too_short() {
+        let mut reader = Cursor::new(b"=3\r\ntxt\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn reject_verbatim_frame_missing_colon() {
-    let mut reader = Cursor::new(b"=6\r\ntxtahi\r\n");
-    assert!(decode_frame(&mut reader).is_err());
-}
+    #[test]
+    fn reject_verbatim_frame_missing_colon() {
+        let mut reader = Cursor::new(b"=6\r\ntxtahi\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn reject_verbatim_frame_missing_crlf() {
-    let mut reader = Cursor::new(b"=6\r\ntxt:hi\rX");
-    assert!(decode_frame(&mut reader).is_err());
-}
+    #[test]
+    fn reject_verbatim_frame_missing_crlf() {
+        let mut reader = Cursor::new(b"=6\r\ntxt:hi\rX");
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
     #[test]
     fn parse_set_frame() {
@@ -684,23 +691,23 @@ fn reject_verbatim_frame_missing_crlf() {
         assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
     }
 
-#[test]
-fn encode_bignum_resp3() {
-    let mut buffer = Vec::new();
-    let frame = Frame::BigNumber("1234567890".into());
-    encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
-    assert_eq!(buffer, b"(1234567890\r\n");
-}
+    #[test]
+    fn encode_bignum_resp3() {
+        let mut buffer = Vec::new();
+        let frame = Frame::BigNumber("1234567890".into());
+        encode_frame(&frame, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"(1234567890\r\n");
+    }
 
-#[test]
-fn bignum_requires_resp3() {
+    #[test]
+    fn bignum_requires_resp3() {
         let mut buffer = Vec::new();
         let frame = Frame::BigNumber("123".into());
         assert!(encode_frame(&frame, ProtocolVersion::Resp2, &mut buffer).is_err());
-}
+    }
 
-#[test]
-fn parse_null_set_frame() {
+    #[test]
+    fn parse_null_set_frame() {
         let mut reader = Cursor::new(b"~-1\r\n");
         let frame = decode_frame(&mut reader).unwrap();
         assert!(matches!(frame, Frame::Set(None)));
@@ -725,36 +732,92 @@ fn parse_null_set_frame() {
     }
 
     #[test]
-fn reject_negative_push_length() {
-    let mut reader = Cursor::new(b">-1\r\n");
-    assert!(decode_frame(&mut reader).is_err());
-}
+    fn reject_negative_push_length() {
+        let mut reader = Cursor::new(b">-1\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn reject_oversized_array_length() {
-    let mut reader =
-        Cursor::new(format!("*{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
-    assert!(decode_frame(&mut reader).is_err());
-}
+    #[test]
+    fn reject_oversized_array_length() {
+        let mut reader = Cursor::new(format!("*{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn reject_oversized_map_length() {
-    let mut reader =
-        Cursor::new(format!("%{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
-    assert!(decode_frame(&mut reader).is_err());
-}
+    #[test]
+    fn reject_oversized_map_length() {
+        let mut reader = Cursor::new(format!("%{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn encode_null_resp2_as_bulk_null() {
-    let mut buffer = Vec::new();
-    encode_frame(&Frame::Null, ProtocolVersion::Resp2, &mut buffer).unwrap();
-    assert_eq!(buffer, b"$-1\r\n");
-}
+    #[test]
+    fn reject_oversized_set_length() {
+        let mut reader = Cursor::new(format!("~{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
 
-#[test]
-fn encode_null_resp3_as_null_literal() {
-    let mut buffer = Vec::new();
-    encode_frame(&Frame::Null, ProtocolVersion::Resp3, &mut buffer).unwrap();
-    assert_eq!(buffer, b"_\r\n");
-}
+    #[test]
+    fn reject_oversized_push_length() {
+        let mut reader = Cursor::new(format!(">{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_oversized_attribute_length() {
+        let mut reader = Cursor::new(format!("|{}\r\n", MAX_COLLECTION_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_invalid_integer_frame() {
+        let mut reader = Cursor::new(b":notanint\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_invalid_double_frame() {
+        let mut reader = Cursor::new(b",notadouble\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_empty_bignum_frame() {
+        let mut reader = Cursor::new(b"(\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn encode_null_resp2_as_bulk_null() {
+        let mut buffer = Vec::new();
+        encode_frame(&Frame::Null, ProtocolVersion::Resp2, &mut buffer).unwrap();
+        assert_eq!(buffer, b"$-1\r\n");
+    }
+
+    #[test]
+    fn encode_null_resp3_as_null_literal() {
+        let mut buffer = Vec::new();
+        encode_frame(&Frame::Null, ProtocolVersion::Resp3, &mut buffer).unwrap();
+        assert_eq!(buffer, b"_\r\n");
+    }
+
+    #[test]
+    fn collection_length_validator_fuzzed_limits() {
+        let modulus = (MAX_COLLECTION_SIZE as i64) * 3 + 1;
+        let mut state = 0xdeadbeefu64;
+        for _ in 0..512 {
+            let candidate = (pseudo_random_u64(&mut state) % modulus as u64) as i64 - (modulus / 2);
+            let valid = candidate >= 0 && candidate <= MAX_COLLECTION_SIZE;
+            assert_eq!(ensure_collection_length(candidate).is_ok(), valid);
+        }
+    }
+
+    #[test]
+    fn bulk_length_validator_fuzzed_limits() {
+        let modulus = (MAX_BULK_SIZE as i64) * 3 + 1;
+        let mut state = 0xfeedfaceu64;
+        for _ in 0..512 {
+            let candidate = (pseudo_random_u64(&mut state) % modulus as u64) as i64 - (modulus / 2);
+            let valid = candidate >= 0 && candidate <= MAX_BULK_SIZE;
+            assert_eq!(ensure_bulk_length(candidate).is_ok(), valid);
+        }
+    }
 }

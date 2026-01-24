@@ -48,6 +48,7 @@ redis-cli -p 6379 GET hello
 redis-cli -p 6379 HELLO 3
 redis-cli -p 6379 MSET key1 value1 key2 value2
 redis-cli -p 6379 MGET key1 key2
+redis-cli -p 6379 INFO
 ```
 
 ## Features
@@ -56,6 +57,10 @@ redis-cli -p 6379 MGET key1 key2
 - In-memory store with optional expirations and atomic counter support using a sharded `DashMap`.
 - RESP3 parsing now understands maps, sets, attributes, push frames, verbatim strings, and big numbers and enforces payload/collection caps to avoid DoS injections.
 - Configurable thread pool via `RALPHDB_THREADS` for multi-core command handling.
+- Optional command: `INFO [section]` returns server metadata text (currently `server`/`default`) in both RESP2/RESP3 modes.
+
+### INFO command
+`INFO` returns a bulk-string that lists the server version, role, mode, and the stable `id` emitted via `HELLO 3`. Only the `server`/`default` sections are recognized; any other section yields `ERR unsupported INFO section '<name>'`, so clients always see deterministic text.
 
 ### Protocol Hardening
 - Bulk strings are capped at 32 MiB and collections at 1 million entries to keep frame parsing predictable and resilient.
@@ -80,6 +85,20 @@ Tests cover the refreshed protocol parser (frame limits, RESP3 types) plus stric
 ## RESP3 Compatibility
 - RESP2 clients work out of the box; RESP3-specific capabilities activate when `HELLO 3` is negotiated.
 - The protocol module parses RESP2/RESP3 frames and encodes replies that remain readable to either protocol version.
+### HELLO 3 Metadata
+`HELLO 3` replies with a RESP3 map describing the server state. The following keys are guaranteed:
+
+| Key | Meaning |
+| --- | ------- |
+| `server` | The server name (`ralphdb`). |
+| `version` | The current package version (from `CARGO_PKG_VERSION`). |
+| `proto` | The negotiated protocol (`3`). |
+| `id` | A stable server identifier (the crate name, so it does not change per connection). |
+| `mode` | Always `standalone` in this build. |
+| `role` | Always `primary`. |
+| `modules` | Empty array for future module support. |
+
+Clients can rely on `id` staying the same across connections and restarts (it mirrors the crate name), while other fields convey runtime metadata.
 
 ## Project Plan
 See `RESP3_PLAN.md` for instructions and milestones to reach full RESP3 compatibility.

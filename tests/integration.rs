@@ -29,10 +29,13 @@ fn bulk(value: &[u8]) -> Frame {
 
 fn assert_hello3_map(frame: Frame) {
     if let Frame::Map(Some(entries)) = frame {
-        assert_eq!(entries.len(), 3);
         let mut saw_server = false;
         let mut saw_version = false;
         let mut saw_proto = false;
+        let mut saw_id = false;
+        let mut saw_mode = false;
+        let mut saw_role = false;
+        let mut saw_modules = false;
         for (key, value) in entries {
             match (key, value) {
                 (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "server" => {
@@ -47,10 +50,28 @@ fn assert_hello3_map(frame: Frame) {
                     assert_eq!(value, 3);
                     saw_proto = true;
                 }
+                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "id" => {
+                    assert_eq!(value, env!("CARGO_PKG_NAME"));
+                    saw_id = true;
+                }
+                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "mode" => {
+                    assert_eq!(value, "standalone");
+                    saw_mode = true;
+                }
+                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "role" => {
+                    assert_eq!(value, "primary");
+                    saw_role = true;
+                }
+                (Frame::SimpleString(key), Frame::Array(Some(elements))) if key == "modules" => {
+                    assert!(elements.is_empty());
+                    saw_modules = true;
+                }
                 _ => continue,
             }
         }
-        assert!(saw_server && saw_version && saw_proto);
+        assert!(
+            saw_server && saw_version && saw_proto && saw_id && saw_mode && saw_role && saw_modules
+        );
     } else {
         panic!("HELLO 3 should respond with a map");
     }
@@ -140,5 +161,97 @@ fn null_semantics_follow_protocol() -> Result<()> {
 
     handle.join().expect("server thread panicked")?;
 
+    Ok(())
+}
+
+#[test]
+fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    let unsupported_frames = vec![
+        Frame::Boolean(true),
+        Frame::Double(3.14),
+        Frame::Map(Some(vec![(
+            Frame::SimpleString("meta".into()),
+            Frame::SimpleString("value".into()),
+        )])),
+        Frame::Set(Some(vec![Frame::SimpleString("member".into())])),
+        Frame::Push(vec![Frame::SimpleString("element".into())]),
+    ];
+
+    for frame in unsupported_frames {
+        send_array(&mut writer, vec![bulk(b"PING"), frame])?;
+        let response = read_frame(&mut reader)?;
+        assert!(matches!(response, Frame::Error(_)));
+    }
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn resp3_only_argument_types_rejected_after_hello() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    let unsupported_frames = vec![
+        Frame::Boolean(true),
+        Frame::Double(2.71),
+        Frame::Map(Some(vec![(
+            Frame::SimpleString("meta".into()),
+            Frame::SimpleString("value".into()),
+        )])),
+        Frame::Set(Some(vec![Frame::SimpleString("member".into())])),
+        Frame::Push(vec![Frame::SimpleString("element".into())]),
+        Frame::Attribute(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]),
+    ];
+
+    for frame in unsupported_frames {
+        send_array(&mut writer, vec![bulk(b"PING"), frame.clone()])?;
+        let response = read_frame(&mut reader)?;
+        assert!(matches!(response, Frame::Error(_)));
+    }
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
     Ok(())
 }

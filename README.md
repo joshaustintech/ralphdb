@@ -54,7 +54,13 @@ redis-cli -p 6379 MGET key1 key2
 - RESP3 handshake via `HELLO 3` with RESP2 fallback when needed.
 - Core command surface: `PING`, `ECHO`, `SET`, `GET`, `DEL`, `EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`, `EXPIRE`, and `TTL`.
 - In-memory store with optional expirations and atomic counter support using a sharded `DashMap`.
+- RESP3 parsing now understands maps, sets, attributes, push frames, verbatim strings, and big numbers and enforces payload/collection caps to avoid DoS injections.
 - Configurable thread pool via `RALPHDB_THREADS` for multi-core command handling.
+
+### Protocol Hardening
+- Bulk strings are capped at 32 MiB and collections at 1 million entries to keep frame parsing predictable and resilient.
+- Null bulk arguments are rejected and `PING`/`MSET` enforce their Redis-compatible arity expectations.
+- Expired keys are treated as missing so repeated `EXPIRE` commands return `0` and `TTL` immediately reflects removal.
 
 ## Benchmarks (redis-benchmark)
 ```bash
@@ -69,6 +75,7 @@ redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -P 16
 ```bash
 cargo test
 ```
+Tests cover the refreshed protocol parser (frame limits, RESP3 types) plus stricter command/expiry semantics (`PING`/`MSET` arity, `EXPIRE` on evicted keys, null argument rejection).
 
 ## RESP3 Compatibility
 - RESP2 clients work out of the box; RESP3-specific capabilities activate when `HELLO 3` is negotiated.

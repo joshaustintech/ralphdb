@@ -75,6 +75,12 @@ impl Storage {
     pub fn expire(&self, key: &[u8], duration: Duration) -> bool {
         let expiry = Instant::now() + duration;
         if let Some(mut entry) = self.inner.get_mut(key) {
+            if entry.expired() {
+                drop(entry);
+                self.inner.remove(key);
+                return false;
+            }
+
             entry.expires_at = Some(expiry);
             true
         } else {
@@ -161,6 +167,16 @@ mod tests {
         sleep(Duration::from_millis(20));
         assert_eq!(storage.get(b"key"), None);
         assert_eq!(storage.ttl(b"key"), -2);
+    }
+
+    #[test]
+    fn expire_on_expired_key_returns_false() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        assert!(storage.expire(b"temp", Duration::from_millis(5)));
+        sleep(Duration::from_millis(20));
+        assert!(!storage.expire(b"temp", Duration::from_secs(1)));
+        assert_eq!(storage.get(b"temp"), None);
     }
 
     #[test]

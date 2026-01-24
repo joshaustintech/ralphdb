@@ -1,6 +1,9 @@
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
 
+const MAX_BULK_SIZE: i64 = 32 * 1024 * 1024; // 32 MiB per bulk string
+const MAX_COLLECTION_SIZE: i64 = 1_000_000; // 1 million entries per collection
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolVersion {
     Resp2,
@@ -23,9 +26,15 @@ pub enum Frame {
     Null,
     Boolean(bool),
     Double(f64),
+    Map(Option<Vec<(Frame, Frame)>>),
+    Set(Option<Vec<Frame>>),
+    Push(Vec<Frame>),
+    Attribute(Vec<(Frame, Frame)>),
+    VerbatimString { format: String, payload: Vec<u8> },
+    BigNumber(String),
 }
 
-fn read_line<R: BufRead>(reader: &mut R) -> io::Result<String> {
+fn read_line_bytes<R: BufRead>(reader: &mut R) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::new();
     let len = reader.read_until(b'\n', &mut buffer)?;
     if len == 0 {
@@ -34,16 +43,50 @@ fn read_line<R: BufRead>(reader: &mut R) -> io::Result<String> {
 
     if buffer.ends_with(b"\r\n") {
         buffer.truncate(buffer.len() - 2);
-        Ok(String::from_utf8_lossy(&buffer).to_string())
+        Ok(buffer)
     } else if buffer.ends_with(b"\n") {
         buffer.truncate(buffer.len() - 1);
-        Ok(String::from_utf8_lossy(&buffer).to_string())
+        Ok(buffer)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "missing CRLF in frame",
         ))
     }
+}
+
+fn read_line<R: BufRead>(reader: &mut R) -> io::Result<String> {
+    let bytes = read_line_bytes(reader)?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+fn parse_length(line: &str) -> io::Result<i64> {
+    i64::from_str(line)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid length value"))
+}
+
+fn ensure_non_negative(length: i64, max: i64, kind: &str) -> io::Result<usize> {
+    if length < 0 {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{kind} must be non-negative"),
+        ))
+    } else if length > max {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{kind} exceeds maximum allowed size"),
+        ))
+    } else {
+        Ok(length as usize)
+    }
+}
+
+fn ensure_collection_length(length: i64) -> io::Result<usize> {
+    ensure_non_negative(length, MAX_COLLECTION_SIZE, "collection length")
+}
+
+fn ensure_bulk_length(length: i64) -> io::Result<usize> {
+    ensure_non_negative(length, MAX_BULK_SIZE, "bulk length")
 }
 
 pub fn decode_frame<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
@@ -88,6 +131,12 @@ pub fn decode_frame<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
             let _ = read_line(reader)?;
             Ok(Frame::Null)
         }
+        b'%' => decode_map(reader),
+        b'~' => decode_set(reader),
+        b'>' => decode_push(reader),
+        b'|' => decode_attribute(reader),
+        b'=' => decode_verbatim(reader),
+        b'(' => decode_bignum(reader),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unsupported frame type",
@@ -97,13 +146,20 @@ pub fn decode_frame<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
 
 fn decode_bulk<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
     let line = read_line(reader)?;
-    let length = i64::from_str(&line)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid bulk length"))?;
+    let length = parse_length(&line)?;
     if length == -1 {
         return Ok(Frame::BulkString(None));
     }
 
-    let mut buffer = vec![0u8; length as usize];
+    if length < -1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid bulk length",
+        ));
+    }
+
+    let length = ensure_bulk_length(length)?;
+    let mut buffer = vec![0u8; length];
     reader.read_exact(&mut buffer)?;
     let mut crlf = [0u8; 2];
     reader.read_exact(&mut crlf)?;
@@ -119,17 +175,140 @@ fn decode_bulk<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
 
 fn decode_array<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
     let line = read_line(reader)?;
-    let length = i64::from_str(&line)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid array length"))?;
+    let length = parse_length(&line)?;
     if length == -1 {
         return Ok(Frame::Array(None));
     }
 
-    let mut items = Vec::with_capacity(length as usize);
-    for _ in 0..length {
+    if length < -1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid array length",
+        ));
+    }
+
+    let count = ensure_collection_length(length)?;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
         items.push(decode_frame(reader)?);
     }
     Ok(Frame::Array(Some(items)))
+}
+
+fn decode_map<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line(reader)?;
+    let length = parse_length(&line)?;
+    if length == -1 {
+        return Ok(Frame::Map(None));
+    }
+
+    if length < -1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid map length",
+        ));
+    }
+
+    let pairs = ensure_collection_length(length)?;
+    let mut entries = Vec::with_capacity(pairs);
+    for _ in 0..pairs {
+        let key = decode_frame(reader)?;
+        let value = decode_frame(reader)?;
+        entries.push((key, value));
+    }
+
+    Ok(Frame::Map(Some(entries)))
+}
+
+fn decode_set<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line(reader)?;
+    let length = parse_length(&line)?;
+    if length == -1 {
+        return Ok(Frame::Set(None));
+    }
+
+    if length < -1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid set length",
+        ));
+    }
+
+    let count = ensure_collection_length(length)?;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        items.push(decode_frame(reader)?);
+    }
+
+    Ok(Frame::Set(Some(items)))
+}
+
+fn decode_push<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line(reader)?;
+    let length = parse_length(&line)?;
+    if length < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid push length",
+        ));
+    }
+
+    let count = ensure_collection_length(length)?;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        items.push(decode_frame(reader)?);
+    }
+
+    Ok(Frame::Push(items))
+}
+
+fn decode_attribute<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line(reader)?;
+    let length = parse_length(&line)?;
+    if length < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid attribute length",
+        ));
+    }
+
+    let pairs = ensure_collection_length(length)?;
+    let mut attributes = Vec::with_capacity(pairs);
+    for _ in 0..pairs {
+        let key = decode_frame(reader)?;
+        let value = decode_frame(reader)?;
+        attributes.push((key, value));
+    }
+
+    Ok(Frame::Attribute(attributes))
+}
+
+fn decode_verbatim<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line_bytes(reader)?;
+    let colon_index = line.iter().position(|&b| b == b':').ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing verbatim format delimiter",
+        )
+    })?;
+
+    let format_bytes = &line[..colon_index];
+    let payload = line[colon_index + 1..].to_vec();
+
+    let format = String::from_utf8_lossy(format_bytes).to_string();
+
+    Ok(Frame::VerbatimString { format, payload })
+}
+
+fn decode_bignum<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
+    let line = read_line(reader)?;
+    if line.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty bignum payload",
+        ));
+    }
+    Ok(Frame::BigNumber(line))
 }
 
 pub fn encode_frame<W: Write>(
@@ -179,6 +358,82 @@ pub fn encode_frame<W: Write>(
         (Frame::Array(None), _) => {
             write!(writer, "*-1\r\n")?;
         }
+        (Frame::Map(Some(entries)), ProtocolVersion::Resp3) => {
+            write!(writer, "%{}\r\n", entries.len())?;
+            for (key, value) in entries {
+                encode_frame(key, version, writer)?;
+                encode_frame(value, version, writer)?;
+            }
+        }
+        (Frame::Map(None), ProtocolVersion::Resp3) => {
+            write!(writer, "%-1\r\n")?;
+        }
+        (Frame::Map(_), _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "map frames require RESP3",
+            ));
+        }
+        (Frame::Set(Some(elements)), ProtocolVersion::Resp3) => {
+            write!(writer, "~{}\r\n", elements.len())?;
+            for item in elements {
+                encode_frame(item, version, writer)?;
+            }
+        }
+        (Frame::Set(None), ProtocolVersion::Resp3) => {
+            write!(writer, "~-1\r\n")?;
+        }
+        (Frame::Set(_), _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "set frames require RESP3",
+            ));
+        }
+        (Frame::Push(elements), ProtocolVersion::Resp3) => {
+            write!(writer, ">{}\r\n", elements.len())?;
+            for element in elements {
+                encode_frame(element, version, writer)?;
+            }
+        }
+        (Frame::Push(_), _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "push frames require RESP3",
+            ));
+        }
+        (Frame::Attribute(attributes), ProtocolVersion::Resp3) => {
+            write!(writer, "|{}\r\n", attributes.len())?;
+            for (key, value) in attributes {
+                encode_frame(key, version, writer)?;
+                encode_frame(value, version, writer)?;
+            }
+        }
+        (Frame::Attribute(_), _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "attribute frames require RESP3",
+            ));
+        }
+        (Frame::VerbatimString { format, payload }, ProtocolVersion::Resp3) => {
+            write!(writer, "={}:", format)?;
+            writer.write_all(payload)?;
+            writer.write_all(b"\r\n")?;
+        }
+        (Frame::VerbatimString { .. }, _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "verbatim frames require RESP3",
+            ));
+        }
+        (Frame::BigNumber(value), ProtocolVersion::Resp3) => {
+            write!(writer, "({}\r\n", value)?;
+        }
+        (Frame::BigNumber(_), _) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "bignum frames require RESP3",
+            ));
+        }
     }
     Ok(())
 }
@@ -207,5 +462,61 @@ mod tests {
         let mut buffer = Vec::new();
         encode_frame(&Frame::Integer(42), ProtocolVersion::Resp2, &mut buffer).unwrap();
         assert_eq!(buffer, b":42\r\n");
+    }
+
+    #[test]
+    fn reject_invalid_bulk_length() {
+        let mut reader = Cursor::new(b"$-2\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_oversized_bulk_length() {
+        let mut reader = Cursor::new(format!("${}\r\n", MAX_BULK_SIZE + 1).into_bytes());
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn parse_map_frame() {
+        let mut reader = Cursor::new(b"%1\r\n+foo\r\n+bar\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Map(Some(entries)) if entries.len() == 1));
+    }
+
+    #[test]
+    fn parse_verbatim_frame() {
+        let mut reader = Cursor::new(b"=txt:hello\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(
+            matches!(frame, Frame::VerbatimString { format, payload } if format == "txt" && payload == b"hello")
+        );
+    }
+
+    #[test]
+    fn parse_set_frame() {
+        let mut reader = Cursor::new(b"~2\r\n+foo\r\n+bar\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Set(Some(elements)) if elements.len() == 2));
+    }
+
+    #[test]
+    fn parse_push_frame() {
+        let mut reader = Cursor::new(b">2\r\n+foo\r\n+bar\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Push(elements) if elements.len() == 2));
+    }
+
+    #[test]
+    fn parse_attribute_frame() {
+        let mut reader = Cursor::new(b"|1\r\n+foo\r\n+bar\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Attribute(attributes) if attributes.len() == 1));
+    }
+
+    #[test]
+    fn parse_bignum_frame() {
+        let mut reader = Cursor::new(b"(12345678901234567890\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::BigNumber(value) if value == "12345678901234567890"));
     }
 }

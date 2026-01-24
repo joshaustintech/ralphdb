@@ -36,7 +36,7 @@ impl TryFrom<Frame> for Command {
             let args = iter
                 .map(|frame| match frame {
                     Frame::BulkString(Some(bytes)) => Ok(bytes),
-                    Frame::BulkString(None) => Ok(vec![]),
+                    Frame::BulkString(None) => Err("ERR null bulk string not allowed".to_string()),
                     Frame::SimpleString(s) => Ok(s.into_bytes()),
                     Frame::Integer(i) => Ok(i.to_string().into_bytes()),
                     _ => Err("ERR unsupported argument type".to_string()),
@@ -110,10 +110,10 @@ pub fn execute(command: &Command, storage: &Storage, state: &mut ConnectionState
 }
 
 fn ping(args: &[Vec<u8>]) -> CommandResult {
-    if args.is_empty() {
-        CommandResult::ok(Frame::SimpleString("PONG".into()))
-    } else {
-        CommandResult::ok(Frame::BulkString(Some(args[0].clone())))
+    match args.len() {
+        0 => CommandResult::ok(Frame::SimpleString("PONG".into())),
+        1 => CommandResult::ok(Frame::BulkString(Some(args[0].clone()))),
+        _ => CommandResult::error("ERR wrong number of arguments for 'ping' command"),
     }
 }
 
@@ -233,6 +233,10 @@ fn mget(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
 }
 
 fn mset(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
+    if args.is_empty() {
+        return CommandResult::error("ERR wrong number of arguments for 'mset'");
+    }
+
     if args.len() % 2 != 0 {
         return CommandResult::error("ERR wrong number of arguments for 'mset'");
     }
@@ -277,7 +281,9 @@ fn ttl(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ProtocolVersion;
+    use crate::protocol::{Frame, ProtocolVersion};
+    use std::thread::sleep;
+    use std::time::Duration;
 
     #[test]
     fn parse_set_get_command() {
@@ -324,5 +330,49 @@ mod tests {
         let result = execute(&hello_cmd, &storage, &mut state);
         assert_eq!(state.protocol, ProtocolVersion::Resp3);
         assert!(matches!(result.response, Frame::Array(Some(_))));
+    }
+
+    #[test]
+    fn ping_errors_with_extra_args() {
+        let args = vec![b"one".to_vec(), b"two".to_vec()];
+        let result = ping(&args);
+        assert!(matches!(result.response, Frame::Error(_)));
+    }
+
+    #[test]
+    fn reject_null_bulk_argument() {
+        let frame = Frame::Array(Some(vec![
+            Frame::BulkString(Some(b"PING".to_vec())),
+            Frame::BulkString(None),
+        ]));
+        assert!(Command::try_from(frame).is_err());
+    }
+
+    #[test]
+    fn mset_requires_arguments() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "MSET".into(),
+            args: vec![],
+        };
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Error(_)));
+    }
+
+    #[test]
+    fn expire_on_expired_key_returns_zero() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        assert!(storage.expire(b"temp", Duration::from_millis(5)));
+        sleep(Duration::from_millis(20));
+
+        let mut state = ConnectionState::default();
+        let expire_cmd = Command {
+            name: "EXPIRE".into(),
+            args: vec![b"temp".to_vec(), b"10".to_vec()],
+        };
+        let result = execute(&expire_cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Integer(0)));
     }
 }

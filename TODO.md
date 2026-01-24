@@ -1,5 +1,5 @@
 # Next Steps
-- Decide whether RESP3 scalar argument frames (bool/double/bignum/etc.) should be accepted after `HELLO 3`; if so, coerce them into command arguments and update integration tests.
-- Add integration coverage for `INFO` in both RESP2 and RESP3 modes, including unsupported-section errors.
-- Implement another optional command from `RESP3_PLAN.md` (`CONFIG GET` or `CLIENT SETNAME`) with RESP2/RESP3 response coverage.
-- Add a RESP2 vs RESP3 compatibility matrix to `README.md`, covering reply types and argument handling.
+- Decide on a RESP3-safe `CLIENT LIST` reply shape (attributes must precede a reply); either return a map/array response and optionally send a push, or add protocol support for attribute + reply frames.
+- Add integration coverage for `CLIENT ID` (RESP2 + RESP3) and `CLIENT LIST` in RESP2 mode to confirm encodings and null handling stay consistent.
+- Extend `CONFIG GET` tests for non-matching patterns (empty array) and exact key lookup (e.g., `server.name`) in both RESP2 and RESP3 modes.
+- Document the exact `CONFIG GET` key list in `README.md` (with a stable ordering) so users know what `redis-benchmark` consumes.

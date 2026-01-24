@@ -1,3 +1,5 @@
+use std::env;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use crate::{
@@ -5,15 +7,18 @@ use crate::{
     storage::{Storage, StorageError},
 };
 
+static CLIENT_ID_COUNTER: AtomicI64 = AtomicI64::new(1);
+
 pub struct Command {
     pub name: String,
     pub args: Vec<Vec<u8>>,
 }
 
-impl TryFrom<Frame> for Command {
-    type Error = String;
-
-    fn try_from(value: Frame) -> Result<Self, Self::Error> {
+impl Command {
+    pub fn from_frame_with_protocol(
+        value: Frame,
+        protocol: ProtocolVersion,
+    ) -> Result<Self, String> {
         if let Frame::Array(Some(elements)) = value {
             if elements.is_empty() {
                 return Err("ERR missing command".into());
@@ -34,13 +39,7 @@ impl TryFrom<Frame> for Command {
             };
 
             let args = iter
-                .map(|frame| match frame {
-                    Frame::BulkString(Some(bytes)) => Ok(bytes),
-                    Frame::BulkString(None) => Err("ERR null bulk string not allowed".to_string()),
-                    Frame::SimpleString(s) => Ok(s.into_bytes()),
-                    Frame::Integer(i) => Ok(i.to_string().into_bytes()),
-                    _ => Err("ERR unsupported argument type".to_string()),
-                })
+                .map(|frame| to_arg_bytes(frame, protocol))
                 .collect::<Result<Vec<_>, _>>()?;
 
             Ok(Command {
@@ -53,14 +52,46 @@ impl TryFrom<Frame> for Command {
     }
 }
 
+impl TryFrom<Frame> for Command {
+    type Error = String;
+
+    fn try_from(value: Frame) -> Result<Self, Self::Error> {
+        Self::from_frame_with_protocol(value, ProtocolVersion::Resp2)
+    }
+}
+
+fn to_arg_bytes(frame: Frame, protocol: ProtocolVersion) -> Result<Vec<u8>, String> {
+    match frame {
+        Frame::BulkString(Some(bytes)) => Ok(bytes),
+        Frame::BulkString(None) => Err("ERR null bulk string not allowed".to_string()),
+        Frame::SimpleString(s) => Ok(s.into_bytes()),
+        Frame::Integer(i) => Ok(i.to_string().into_bytes()),
+        Frame::Boolean(value) if protocol == ProtocolVersion::Resp3 => Ok(if value {
+            b"true".to_vec()
+        } else {
+            b"false".to_vec()
+        }),
+        Frame::Double(value) if protocol == ProtocolVersion::Resp3 => {
+            Ok(value.to_string().into_bytes())
+        }
+        Frame::BigNumber(value) if protocol == ProtocolVersion::Resp3 => Ok(value.into_bytes()),
+        Frame::VerbatimString { payload, .. } if protocol == ProtocolVersion::Resp3 => Ok(payload),
+        _ => Err("ERR unsupported argument type".to_string()),
+    }
+}
+
 pub struct ConnectionState {
     pub protocol: ProtocolVersion,
+    pub client_name: Option<Vec<u8>>,
+    pub client_id: i64,
 }
 
 impl Default for ConnectionState {
     fn default() -> Self {
         Self {
             protocol: ProtocolVersion::Resp2,
+            client_name: None,
+            client_id: CLIENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
         }
     }
 }
@@ -92,6 +123,8 @@ pub fn execute(command: &Command, storage: &Storage, state: &mut ConnectionState
         "ECHO" => echo(&command.args),
         "HELLO" => hello(&command.args, state),
         "INFO" => info(&command.args),
+        "CONFIG" => config(&command.args),
+        "CLIENT" => client(&command.args, state),
         "QUIT" => CommandResult {
             response: Frame::SimpleString("OK".into()),
             close: true,
@@ -327,6 +360,172 @@ fn info(args: &[Vec<u8>]) -> CommandResult {
     }
 }
 
+fn client(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
+    if args.is_empty() {
+        return CommandResult::error("ERR wrong number of arguments for 'client' command");
+    }
+
+    let subcommand = String::from_utf8_lossy(&args[0]).to_ascii_uppercase();
+
+    match subcommand.as_str() {
+        "SETNAME" => client_setname(&args[1..], state),
+        "GETNAME" => {
+            if args.len() != 1 {
+                return CommandResult::error("ERR wrong number of arguments for 'client getname'");
+            }
+            client_getname(state)
+        }
+        "LIST" => client_list(&args[1..], state),
+        "ID" => client_id(&args[1..], state),
+        _ => CommandResult::error("ERR unknown CLIENT subcommand"),
+    }
+}
+
+fn client_setname(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
+    if args.len() != 1 {
+        return CommandResult::error("ERR wrong number of arguments for 'client setname'");
+    }
+
+    state.client_name = Some(args[0].clone());
+    CommandResult::ok(Frame::SimpleString("OK".into()))
+}
+
+fn client_getname(state: &ConnectionState) -> CommandResult {
+    match &state.client_name {
+        Some(name) => CommandResult::ok(Frame::BulkString(Some(name.clone()))),
+        None => CommandResult::ok(Frame::Null),
+    }
+}
+
+fn client_id(args: &[Vec<u8>], state: &ConnectionState) -> CommandResult {
+    if !args.is_empty() {
+        return CommandResult::error("ERR wrong number of arguments for 'client id'");
+    }
+
+    CommandResult::ok(Frame::Integer(state.client_id))
+}
+
+fn client_list(args: &[Vec<u8>], state: &ConnectionState) -> CommandResult {
+    if !args.is_empty() {
+        return CommandResult::error("ERR wrong number of arguments for 'client list'");
+    }
+
+    if state.protocol == ProtocolVersion::Resp3 {
+        let name_frame = match &state.client_name {
+            Some(name) => Frame::BulkString(Some(name.clone())),
+            None => Frame::Null,
+        };
+
+        let protocol_name = match state.protocol {
+            ProtocolVersion::Resp3 => "RESP3",
+            ProtocolVersion::Resp2 => "RESP2",
+        };
+
+        let client_map = vec![
+            (
+                Frame::SimpleString("id".into()),
+                Frame::Integer(state.client_id),
+            ),
+            (Frame::SimpleString("name".into()), name_frame),
+            (
+                Frame::SimpleString("protocol".into()),
+                Frame::SimpleString(protocol_name.into()),
+            ),
+        ];
+
+        let attribute = Frame::Attribute(vec![(
+            Frame::SimpleString("client".into()),
+            Frame::Push(vec![Frame::Map(Some(client_map))]),
+        )]);
+
+        CommandResult::ok(attribute)
+    } else {
+        let mut summary = format!("id={}", state.client_id);
+        if let Some(name) = &state.client_name {
+            summary.push_str(&format!(" name={}", String::from_utf8_lossy(name)));
+        } else {
+            summary.push_str(" name=(null)");
+        }
+        summary.push_str(" protocol=RESP2");
+        CommandResult::ok(Frame::SimpleString(summary))
+    }
+}
+
+fn config(args: &[Vec<u8>]) -> CommandResult {
+    if args.len() != 2 {
+        return CommandResult::error("ERR wrong number of arguments for 'config' command");
+    }
+
+    let subcommand = String::from_utf8_lossy(&args[0]).to_ascii_uppercase();
+    if subcommand != "GET" {
+        return CommandResult::error("ERR only CONFIG GET is supported");
+    }
+
+    let pattern = match std::str::from_utf8(&args[1]) {
+        Ok(value) => value,
+        Err(_) => {
+            return CommandResult::error("ERR invalid CONFIG GET pattern");
+        }
+    };
+
+    let entries: Vec<_> = config_entries()
+        .into_iter()
+        .filter(|(key, _)| matches_pattern(pattern, key))
+        .collect();
+
+    let mut frames = Vec::with_capacity(entries.len() * 2);
+    for (key, value) in entries {
+        frames.push(Frame::BulkString(Some(key.into_bytes())));
+        frames.push(Frame::BulkString(Some(value.into_bytes())));
+    }
+
+    CommandResult::ok(Frame::Array(Some(frames)))
+}
+
+fn config_entries() -> Vec<(String, String)> {
+    let host = env::var("RALPHDB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let port = env::var("RALPHDB_PORT").unwrap_or_else(|_| "6379".into());
+    let threads = default_threads();
+
+    vec![
+        ("server.name".into(), "ralphdb".into()),
+        ("server.version".into(), env!("CARGO_PKG_VERSION").into()),
+        ("server.bind".into(), host),
+        ("server.port".into(), port),
+        ("server.threads".into(), threads.to_string()),
+    ]
+}
+
+fn default_threads() -> usize {
+    env::var("RALPHDB_THREADS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
+}
+
+fn matches_pattern(pattern: &str, key: &str) -> bool {
+    if pattern == "*" {
+        true
+    } else if pattern.is_empty() {
+        false
+    } else if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 1 {
+        let inner = &pattern[1..pattern.len() - 1];
+        key.contains(inner)
+    } else if pattern.starts_with('*') {
+        let suffix = &pattern[1..];
+        key.ends_with(suffix)
+    } else if pattern.ends_with('*') {
+        let prefix = &pattern[..pattern.len() - 1];
+        key.starts_with(prefix)
+    } else {
+        key == pattern
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,5 +746,235 @@ mod tests {
         assert!(
             matches!(result.response, Frame::Error(ref message) if message.contains("unsupported INFO section"))
         );
+    }
+
+    #[test]
+    fn client_setname_updates_state() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"SETNAME".to_vec(), b"ralph".to_vec()],
+        };
+
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+        assert_eq!(state.client_name.unwrap(), b"ralph".to_vec());
+    }
+
+    #[test]
+    fn client_setname_rejects_wrong_arity() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"SETNAME".to_vec()],
+        };
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Error(_)));
+    }
+
+    #[test]
+    fn client_unknown_subcommand_errors() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"NOPE".to_vec()],
+        };
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(
+            matches!(result.response, Frame::Error(ref message) if message.contains("unknown CLIENT subcommand"))
+        );
+    }
+
+    #[test]
+    fn client_getname_returns_null_if_not_set() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"GETNAME".to_vec()],
+        };
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Null));
+    }
+
+    #[test]
+    fn client_getname_returns_value_after_setname() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let set_cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"SETNAME".to_vec(), b"ralph".to_vec()],
+        };
+        let _ = execute(&set_cmd, &storage, &mut state);
+
+        let get_cmd = Command {
+            name: "CLIENT".into(),
+            args: vec![b"GETNAME".to_vec()],
+        };
+        let result = execute(&get_cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::BulkString(Some(ref value)) if value == b"ralph"));
+    }
+
+    #[test]
+    fn resp3_double_exponent_coerces_to_string() {
+        let value = Frame::Array(Some(vec![
+            Frame::BulkString(Some(b"PING".to_vec())),
+            Frame::Double(3.1e-5),
+        ]));
+        let command =
+            Command::from_frame_with_protocol(value, ProtocolVersion::Resp3).expect("should parse");
+        assert_eq!(command.args.len(), 1);
+        assert_eq!(command.args[0], 3.1e-5f64.to_string().into_bytes());
+    }
+
+    #[test]
+    fn resp3_double_special_values_coerced_to_bytes() {
+        let special_values = [f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
+        for &value in &special_values {
+            let frame = Frame::Array(Some(vec![
+                Frame::BulkString(Some(b"PING".to_vec())),
+                Frame::Double(value),
+            ]));
+            let command = Command::from_frame_with_protocol(frame, ProtocolVersion::Resp3)
+                .expect("should parse");
+            assert_eq!(command.args.len(), 1);
+            assert_eq!(command.args[0], value.to_string().into_bytes());
+        }
+    }
+
+    #[test]
+    fn resp3_scalar_arguments_coerced_to_bytes() {
+        let value = Frame::Array(Some(vec![
+            Frame::BulkString(Some(b"PING".to_vec())),
+            Frame::Boolean(true),
+            Frame::Double(2.5),
+            Frame::BigNumber("12345678901234567890".into()),
+            Frame::VerbatimString {
+                format: "txt".into(),
+                payload: b"payload".to_vec(),
+            },
+        ]));
+
+        let command =
+            Command::from_frame_with_protocol(value, ProtocolVersion::Resp3).expect("should parse");
+
+        assert_eq!(command.args.len(), 4);
+        assert_eq!(command.args[0], b"true".to_vec());
+        assert_eq!(command.args[1], b"2.5".to_vec());
+        assert_eq!(command.args[2], b"12345678901234567890".to_vec());
+        assert_eq!(command.args[3], b"payload".to_vec());
+    }
+
+    #[test]
+    fn resp2_scalar_arguments_still_rejected() {
+        let frame = Frame::Array(Some(vec![
+            Frame::BulkString(Some(b"PING".to_vec())),
+            Frame::Boolean(false),
+        ]));
+
+        assert!(Command::from_frame_with_protocol(frame, ProtocolVersion::Resp2).is_err());
+    }
+
+    #[test]
+    fn config_get_all_keys_exposed() {
+        let result = config(&[b"GET".to_vec(), b"*".to_vec()]);
+        if let Frame::Array(Some(elements)) = result.response {
+            assert!(elements.len() % 2 == 0);
+            let keys: Vec<_> = elements
+                .chunks(2)
+                .filter_map(|pair| {
+                    if let [Frame::BulkString(Some(key)), _] = pair {
+                        Some(String::from_utf8_lossy(key).to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert!(keys.contains(&"server.name".into()));
+            assert!(keys.contains(&"server.version".into()));
+            assert!(keys.contains(&"server.port".into()));
+        } else {
+            panic!("CONFIG GET * should return an array");
+        }
+    }
+
+    #[test]
+    fn config_get_prefix_pattern_matches() {
+        let result = config(&[b"GET".to_vec(), b"server.*".to_vec()]);
+        if let Frame::Array(Some(elements)) = result.response {
+            assert!(elements.len() % 2 == 0);
+            assert!(elements.len() >= 2);
+        } else {
+            panic!("CONFIG GET server.* should return an array");
+        }
+    }
+
+    #[test]
+    fn client_id_returns_connection_identifier() {
+        let state = ConnectionState::default();
+        let result = client_id(&[], &state);
+        assert!(matches!(result.response, Frame::Integer(value) if value == state.client_id));
+    }
+
+    #[test]
+    fn client_list_resp3_uses_attributes_and_push() {
+        let mut state = ConnectionState::default();
+        state.protocol = ProtocolVersion::Resp3;
+        state.client_name = Some(b"ralph".to_vec());
+        let client_id_value = state.client_id;
+
+        let result = client_list(&[], &state);
+        if let Frame::Attribute(attributes) = result.response {
+            assert_eq!(attributes.len(), 1);
+            let (key, value) = &attributes[0];
+            assert!(matches!(key, Frame::SimpleString(name) if name == "client"));
+            if let Frame::Push(elements) = value {
+                assert_eq!(elements.len(), 1);
+                if let Frame::Map(Some(entries)) = &elements[0] {
+                    let mut saw_id = false;
+                    let mut saw_name = false;
+                    for (entry_key, entry_value) in entries {
+                        if let Frame::SimpleString(entry_key) = entry_key {
+                            match (entry_key.as_str(), entry_value) {
+                                ("id", Frame::Integer(value)) if *value == client_id_value => {
+                                    saw_id = true;
+                                }
+                                ("name", Frame::BulkString(Some(bytes))) if bytes == b"ralph" => {
+                                    saw_name = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    assert!(saw_id);
+                    assert!(saw_name);
+                } else {
+                    panic!("CLIENT LIST push element should be a map");
+                }
+            } else {
+                panic!("CLIENT LIST attribute should hold a push frame");
+            }
+        } else {
+            panic!("CLIENT LIST RESP3 should return an attribute frame");
+        }
+    }
+
+    #[test]
+    fn client_list_resp2_returns_summary_string() {
+        let mut state = ConnectionState::default();
+        state.protocol = ProtocolVersion::Resp2;
+        state.client_name = None;
+
+        let result = client_list(&[], &state);
+        if let Frame::SimpleString(text) = result.response {
+            assert!(text.contains("id="));
+            assert!(text.contains("name=(null)"));
+            assert!(text.contains("protocol=RESP2"));
+        } else {
+            panic!("CLIENT LIST RESP2 should report a simple string");
+        }
     }
 }

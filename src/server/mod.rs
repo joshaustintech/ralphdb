@@ -120,7 +120,7 @@ impl Server {
                 }
             };
 
-            let command = match Command::try_from(frame) {
+            let command = match Command::from_frame_with_protocol(frame, state.protocol) {
                 Ok(cmd) => cmd,
                 Err(err_msg) => {
                     let response = protocol::Frame::Error(err_msg);

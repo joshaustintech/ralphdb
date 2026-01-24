@@ -137,11 +137,19 @@ fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
     match version {
         3 => {
             state.protocol = ProtocolVersion::Resp3;
-            let payload = Frame::Array(Some(vec![
-                Frame::SimpleString("server".into()),
-                Frame::SimpleString("ralphdb".into()),
-                Frame::SimpleString("version".into()),
-                Frame::SimpleString(env!("CARGO_PKG_VERSION").into()),
+            let payload = Frame::Map(Some(vec![
+                (
+                    Frame::SimpleString("server".into()),
+                    Frame::SimpleString("ralphdb".into()),
+                ),
+                (
+                    Frame::SimpleString("version".into()),
+                    Frame::SimpleString(env!("CARGO_PKG_VERSION").into()),
+                ),
+                (
+                    Frame::SimpleString("proto".into()),
+                    Frame::Integer(3),
+                ),
             ]));
             CommandResult::ok(payload)
         }
@@ -317,20 +325,71 @@ mod tests {
         assert!(matches!(result.response, Frame::BulkString(Some(ref value)) if value == b"5"));
     }
 
-    #[test]
-    fn hello_sets_resp3() {
-        let storage = Storage::new();
-        let mut state = ConnectionState::default();
-        assert_eq!(state.protocol, ProtocolVersion::Resp2);
+#[test]
+fn hello_sets_resp3() {
+    let storage = Storage::new();
+    let mut state = ConnectionState::default();
+    assert_eq!(state.protocol, ProtocolVersion::Resp2);
 
-        let hello_cmd = Command {
-            name: "HELLO".into(),
-            args: vec![b"3".to_vec()],
-        };
-        let result = execute(&hello_cmd, &storage, &mut state);
-        assert_eq!(state.protocol, ProtocolVersion::Resp3);
-        assert!(matches!(result.response, Frame::Array(Some(_))));
+    let hello_cmd = Command {
+        name: "HELLO".into(),
+        args: vec![b"3".to_vec()],
+    };
+    let result = execute(&hello_cmd, &storage, &mut state);
+    assert_eq!(state.protocol, ProtocolVersion::Resp3);
+    if let Frame::Map(Some(entries)) = result.response {
+        assert_eq!(entries.len(), 3);
+        let mut has_server = false;
+        let mut has_version = false;
+        let mut has_proto = false;
+        for (key, value) in entries {
+            match (key, value) {
+                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "server" => {
+                    assert_eq!(value, "ralphdb");
+                    has_server = true;
+                }
+                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "version" => {
+                    assert_eq!(value, env!("CARGO_PKG_VERSION"));
+                    has_version = true;
+                }
+                (Frame::SimpleString(key), Frame::Integer(value)) if key == "proto" => {
+                    assert_eq!(value, 3);
+                    has_proto = true;
+                }
+                _ => continue,
+            }
+        }
+        assert!(has_server && has_version && has_proto);
+    } else {
+        panic!("HELLO 3 response should be a map");
     }
+}
+
+#[test]
+fn hello_defaults_to_resp2() {
+    let storage = Storage::new();
+    let mut state = ConnectionState::default();
+    let hello_cmd = Command {
+        name: "HELLO".into(),
+        args: vec![],
+    };
+    let result = execute(&hello_cmd, &storage, &mut state);
+    assert_eq!(state.protocol, ProtocolVersion::Resp2);
+    assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+}
+
+#[test]
+fn hello_version_two_stays_resp2() {
+    let storage = Storage::new();
+    let mut state = ConnectionState::default();
+    let hello_cmd = Command {
+        name: "HELLO".into(),
+        args: vec![b"2".to_vec()],
+    };
+    let result = execute(&hello_cmd, &storage, &mut state);
+    assert_eq!(state.protocol, ProtocolVersion::Resp2);
+    assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+}
 
     #[test]
     fn ping_errors_with_extra_args() {

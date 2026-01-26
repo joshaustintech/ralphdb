@@ -35,7 +35,8 @@ cargo run --release
 Set these environment variables to override defaults:
 - `RALPHDB_HOST` (default: `127.0.0.1`)
 - `RALPHDB_PORT` (default: `6379`)
-- `RALPHDB_THREADS` (default: `0` for single-thread, >0 to enable thread pool)
+- `RALPHDB_THREADS` (default: number of logical CPUs, at least `1`)
+- `RALPHDB_IDLE_TIMEOUT_SECS` (default: `300`, set to `0` to disable idle-timeout)
 
 ## Real-World Usage
 ```bash
@@ -58,6 +59,7 @@ redis-cli -p 6379 INFO
 - In-memory store with optional expirations and atomic counter support using a sharded `DashMap`.
 - RESP3 parsing now understands maps, sets, attributes, push frames, verbatim strings, and big numbers and enforces payload/collection caps to avoid DoS injections.
 - Configurable thread pool via `RALPHDB_THREADS` for multi-core command handling.
+- Idle connections close automatically after the configured `RALPHDB_IDLE_TIMEOUT_SECS` (300 seconds by default) to avoid resource leaks.
 - Optional command: `INFO [section]` returns server metadata text (currently `server`/`default`) in both RESP2/RESP3 modes.
 - `CONFIG GET <pattern>` exposes a documented key set (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) in that stable order and understands simple wildcard patterns such as `server.*`; unmatched patterns now return an empty array.
 - `CLIENT SETNAME` stores a per-connection name and `CLIENT GETNAME` returns that value (null if unset); both subcommands work for RESP2 and RESP3 sessions. `CLIENT ID` returns the numeric connection identifier while `CLIENT LIST` emits a RESP3 attribute (`client` → push → map with `id`, `name`, `protocol`) that is sent before the legacy summary string so metadata precedes the payload consumers read; RESP2 clients still receive the traditional bulk-string summary.
@@ -76,20 +78,20 @@ redis-cli -p 6379 INFO
 Run two representative workloads against a locally running server:
 
 ```bash
-redis-benchmark -p 6379 -t set,get -n 200 -c 5
-redis-benchmark -p 6379 -t set,get -n 200 -c 5 -P 8
+redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 100 -c 1
+redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10
 ```
 
-Sample throughput summaries from the runs above:
+Sample results from the runs above:
 
-- `redis-benchmark -p 6379 -t set,get -n 200 -c 5`  
-  SET: 20 000 requests per second (avg latency 0.203 ms)  
-  GET: 25 000 requests per second (avg latency 0.172 ms)
-- `redis-benchmark -p 6379 -t set,get -n 200 -c 5 -P 8`  
-  SET: 99 999.99 requests per second (avg latency 0.231 ms)  
-  GET: 66 666.66 requests per second (avg latency 0.249 ms)
+- `redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 100 -c 1`  
+  SET: 10 000 requests per second (avg latency 0.095 ms, max 0.207 ms)  
+  GET: 12 500 requests per second (avg latency 0.072 ms, max 0.167 ms)
+- `redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10`  
+  SET: 66 666 requests per second (avg latency 0.110 ms, max 0.247 ms)  
+  GET: 66 666 requests per second (avg latency 0.094 ms, max 0.135 ms)
 
-`redis-benchmark` now sees a working `CONFIG GET` reply so the benchmark completes without the warning about missing configuration.
+`redis-benchmark` still prints `WARNING: Could not fetch server CONFIG` while probing configuration information, but the benchmark itself succeeds and `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`).
 
 ## Tests
 ```bash

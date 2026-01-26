@@ -132,11 +132,30 @@ pub fn decode_frame<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
         b'|' => decode_attribute(reader),
         b'=' => decode_verbatim(reader),
         b'(' => decode_bignum(reader),
-        _ => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "unsupported frame type",
-        )),
+        other => decode_inline_frame(other, reader),
     }
+}
+
+fn decode_inline_frame<R: BufRead>(first_byte: u8, reader: &mut R) -> io::Result<Frame> {
+    let mut remaining = read_line_bytes(reader)?;
+    let mut line = Vec::with_capacity(1 + remaining.len());
+    line.push(first_byte);
+    line.append(&mut remaining);
+
+    let tokens: Vec<_> = line
+        .split(|byte| *byte == b' ' || *byte == b'\t')
+        .filter(|token| !token.is_empty())
+        .map(|token| Frame::BulkString(Some(token.to_vec())))
+        .collect();
+
+    if tokens.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty inline command",
+        ));
+    }
+
+    Ok(Frame::Array(Some(tokens)))
 }
 
 fn decode_bulk<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
@@ -501,6 +520,20 @@ mod tests {
         let mut reader = Cursor::new(b"+OK\r\n");
         let frame = decode_frame(&mut reader).unwrap();
         assert!(matches!(frame, Frame::SimpleString(ref value) if value == "OK"));
+    }
+
+    #[test]
+    fn parse_inline_command_as_array() {
+        let mut reader = Cursor::new(b"PING\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Array(Some(elements)) if elements.len() == 1));
+    }
+
+    #[test]
+    fn parse_inline_command_with_arguments() {
+        let mut reader = Cursor::new(b"SET key value\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Array(Some(elements)) if elements.len() == 3));
     }
 
     #[test]

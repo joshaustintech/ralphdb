@@ -1,14 +1,16 @@
 use std::{
-    io::{BufReader, BufWriter, Write},
+    env,
+    io::{BufReader, BufWriter, ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
     thread,
+    time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use ralphdb::{
     protocol::{self, Frame, ProtocolVersion},
-    server::Server,
+    server::{self, Server},
     storage::Storage,
 };
 
@@ -25,6 +27,53 @@ fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Frame> {
 
 fn bulk(value: &[u8]) -> Frame {
     Frame::BulkString(Some(value.to_vec()))
+}
+
+fn wait_for_ttl_expired(
+    reader: &mut BufReader<TcpStream>,
+    writer: &mut BufWriter<TcpStream>,
+    key: &[u8],
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        send_array(writer, vec![bulk(b"TTL"), bulk(key)])?;
+        if let Frame::Integer(value) = read_frame(reader)? {
+            if value == -2 {
+                return Ok(());
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    Err(anyhow!(
+        "key {} did not expire within timeout",
+        String::from_utf8_lossy(key)
+    ))
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: Option<&str>) -> Self {
+        let original = env::var(key).ok();
+        match value {
+            Some(value) => unsafe { env::set_var(key, value) },
+            None => unsafe { env::remove_var(key) },
+        }
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(value) = &self.original {
+            unsafe { env::set_var(self.key, value) };
+        } else {
+            unsafe { env::remove_var(self.key) };
+        }
+    }
 }
 
 fn assert_hello3_map(frame: Frame) {
@@ -86,7 +135,7 @@ fn tcp_command_flow() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -127,6 +176,40 @@ fn tcp_command_flow() -> Result<()> {
 }
 
 #[test]
+fn idle_timeout_env_closes_connection() -> Result<()> {
+    let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some("1"));
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+    let config = server::Config::from_env();
+    assert_eq!(config.idle_timeout(), Some(Duration::from_secs(1)));
+    let idle_timeout = config.idle_timeout();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, idle_timeout)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let reader_stream = stream.try_clone()?;
+    reader_stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+    let mut reader = BufReader::new(reader_stream);
+    thread::sleep(Duration::from_millis(1_100));
+
+    let mut buffer = [0u8; 1];
+    match reader.read(&mut buffer) {
+        Ok(0) => {}
+        Err(err) if err.kind() == ErrorKind::UnexpectedEof => {}
+        other => panic!("idle connection was not closed: {other:?}"),
+    }
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
 fn null_semantics_follow_protocol() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let addr = listener.local_addr()?;
@@ -135,7 +218,7 @@ fn null_semantics_follow_protocol() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -165,6 +248,229 @@ fn null_semantics_follow_protocol() -> Result<()> {
 }
 
 #[test]
+fn expire_and_ttl_resp2_flow() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"temp-key"), bulk(b"value")],
+    )?;
+    read_frame(&mut reader)?;
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"EXPIRE"), bulk(b"temp-key"), bulk(b"1")],
+    )?;
+    let expire_response = read_frame(&mut reader)?;
+    assert!(matches!(expire_response, Frame::Integer(1)));
+
+    send_array(&mut writer, vec![bulk(b"TTL"), bulk(b"temp-key")])?;
+    let ttl_frame = read_frame(&mut reader)?;
+    if let Frame::Integer(value) = ttl_frame {
+        assert!(value >= 0);
+    } else {
+        panic!("TTL should return integer");
+    }
+
+    wait_for_ttl_expired(&mut reader, &mut writer, b"temp-key")?;
+
+    send_array(&mut writer, vec![bulk(b"GET"), bulk(b"temp-key")])?;
+    let get_frame = read_frame(&mut reader)?;
+    assert!(matches!(get_frame, Frame::BulkString(None)));
+
+    send_array(&mut writer, vec![bulk(b"TTL"), bulk(b"temp-key")])?;
+    let post_ttl = read_frame(&mut reader)?;
+    assert!(matches!(post_ttl, Frame::Integer(-2)));
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn expire_and_ttl_resp3_flow() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"shelf"), bulk(b"value")],
+    )?;
+    read_frame(&mut reader)?;
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"EXPIRE"), bulk(b"shelf"), bulk(b"1")],
+    )?;
+    let expire_response = read_frame(&mut reader)?;
+    assert!(matches!(expire_response, Frame::Integer(1)));
+
+    send_array(&mut writer, vec![bulk(b"TTL"), bulk(b"shelf")])?;
+    let ttl_frame = read_frame(&mut reader)?;
+    if let Frame::Integer(value) = ttl_frame {
+        assert!(value >= 0);
+    } else {
+        panic!("TTL should return integer");
+    }
+
+    wait_for_ttl_expired(&mut reader, &mut writer, b"shelf")?;
+
+    send_array(&mut writer, vec![bulk(b"GET"), bulk(b"shelf")])?;
+    let get_frame = read_frame(&mut reader)?;
+    assert!(matches!(get_frame, Frame::Null));
+
+    send_array(&mut writer, vec![bulk(b"TTL"), bulk(b"shelf")])?;
+    let post_ttl = read_frame(&mut reader)?;
+    assert!(matches!(post_ttl, Frame::Integer(-2)));
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn incr_decr_resp2_flow() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"counter"), bulk(b"10")],
+    )?;
+    let set_response = read_frame(&mut reader)?;
+    assert!(matches!(set_response, Frame::SimpleString(ref value) if value == "OK"));
+
+    send_array(&mut writer, vec![bulk(b"INCR"), bulk(b"counter")])?;
+    let incr_response = read_frame(&mut reader)?;
+    assert!(matches!(incr_response, Frame::Integer(11)));
+
+    send_array(&mut writer, vec![bulk(b"DECR"), bulk(b"counter")])?;
+    let decr_response = read_frame(&mut reader)?;
+    assert!(matches!(decr_response, Frame::Integer(10)));
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"counter"), bulk(b"NaN")],
+    )?;
+    read_frame(&mut reader)?;
+
+    send_array(&mut writer, vec![bulk(b"INCR"), bulk(b"counter")])?;
+    let invalid_response = read_frame(&mut reader)?;
+    assert!(
+        matches!(invalid_response, Frame::Error(ref message) if message.contains("value is not an integer"))
+    );
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn incr_decr_resp3_flow() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello_frame);
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"counter"), bulk(b"5")],
+    )?;
+    read_frame(&mut reader)?;
+
+    send_array(&mut writer, vec![bulk(b"INCR"), bulk(b"counter")])?;
+    let incr_response = read_frame(&mut reader)?;
+    assert!(matches!(incr_response, Frame::Integer(6)));
+
+    send_array(&mut writer, vec![bulk(b"DECR"), bulk(b"counter")])?;
+    let decr_response = read_frame(&mut reader)?;
+    assert!(matches!(decr_response, Frame::Integer(5)));
+
+    send_array(
+        &mut writer,
+        vec![bulk(b"SET"), bulk(b"counter"), bulk(b"Nope")],
+    )?;
+    read_frame(&mut reader)?;
+
+    send_array(&mut writer, vec![bulk(b"INCR"), bulk(b"counter")])?;
+    let invalid_response = read_frame(&mut reader)?;
+    assert!(
+        matches!(invalid_response, Frame::Error(ref message) if message.contains("value is not an integer"))
+    );
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
 fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let addr = listener.local_addr()?;
@@ -173,7 +479,7 @@ fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -215,7 +521,7 @@ fn resp3_only_argument_types_rejected_after_hello() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -263,7 +569,7 @@ fn resp3_scalar_arguments_allowed_after_hello() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -314,7 +620,7 @@ fn info_command_covers_resp2_and_resp3() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -367,7 +673,7 @@ fn client_setname_supported_in_both_protocols() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -410,7 +716,7 @@ fn client_getname_reports_value_across_protocols() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -460,7 +766,7 @@ fn client_getname_null_after_hello3() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -493,7 +799,7 @@ fn client_list_produces_attribute_push_integration() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -568,7 +874,7 @@ fn client_list_resp2_summary_integration() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -617,7 +923,7 @@ fn client_id_stable_and_monotonic() -> Result<()> {
     let handle = thread::spawn(move || -> Result<()> {
         for _ in 0..2 {
             let (stream, _) = listener.accept()?;
-            Server::handle_connection(stream, server_storage.clone())?;
+            Server::handle_connection(stream, server_storage.clone(), None)?;
         }
         Ok(())
     });
@@ -685,7 +991,7 @@ fn config_get_exact_key_and_nonmatching_patterns() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 
@@ -764,7 +1070,7 @@ fn config_get_star_available() -> Result<()> {
 
     let handle = thread::spawn(move || -> Result<()> {
         let (stream, _) = listener.accept()?;
-        Server::handle_connection(stream, server_storage)?;
+        Server::handle_connection(stream, server_storage, None)?;
         Ok(())
     });
 

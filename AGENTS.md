@@ -25,6 +25,7 @@
 - Place unit tests in the same module file and integration tests in `tests/`.
 - Name tests descriptively by behavior, e.g., `resp3_parses_push_frame`.
 - Target thorough protocol coverage (RESP2/RESP3 parsing, edge cases, and negotiation).
+- Test using the redis client CLI and redis-benchmark for issues
 
 ## Commit & Pull Request Guidelines
 - Git history shows only an “Initial commit,” so no established message convention.

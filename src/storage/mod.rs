@@ -148,8 +148,26 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread::sleep;
-    use std::time::Duration;
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+
+    fn wait_for_removal(storage: &Storage, key: &[u8]) {
+        let timeout = Duration::from_secs(1);
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if storage.get(key).is_none() {
+                return;
+            }
+            sleep(Duration::from_millis(5));
+        }
+        panic!(
+            "key {:?} did not expire within {:?}",
+            String::from_utf8_lossy(key),
+            timeout
+        );
+    }
 
     #[test]
     fn set_get_round_trip() {
@@ -164,7 +182,7 @@ mod tests {
         storage.set(b"key".to_vec(), b"value".to_vec());
         assert!(storage.expire(b"key", Duration::from_millis(10)));
         assert!(storage.ttl(b"key") > -1);
-        sleep(Duration::from_millis(20));
+        wait_for_removal(&storage, b"key");
         assert_eq!(storage.get(b"key"), None);
         assert_eq!(storage.ttl(b"key"), -2);
     }
@@ -174,7 +192,7 @@ mod tests {
         let storage = Storage::new();
         storage.set(b"temp".to_vec(), b"value".to_vec());
         assert!(storage.expire(b"temp", Duration::from_millis(5)));
-        sleep(Duration::from_millis(20));
+        wait_for_removal(&storage, b"temp");
         assert!(!storage.expire(b"temp", Duration::from_secs(1)));
         assert_eq!(storage.get(b"temp"), None);
     }

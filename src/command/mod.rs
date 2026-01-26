@@ -2,6 +2,7 @@ use std::env;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
+use log::debug;
 use crate::{
     protocol::{Frame, ProtocolVersion},
     storage::{Storage, StorageError},
@@ -470,6 +471,7 @@ fn client_list_summary(state: &ConnectionState) -> String {
 }
 
 fn config(args: &[Vec<u8>]) -> CommandResult {
+    debug!("CONFIG request args (len={}): {:?}", args.len(), args);
     if args.len() != 2 {
         return CommandResult::error("ERR wrong number of arguments for 'config' command");
     }
@@ -511,6 +513,8 @@ fn config_entries() -> Vec<(String, String)> {
         ("server.bind".into(), host),
         ("server.port".into(), port),
         ("server.threads".into(), threads.to_string()),
+        ("save".into(), "900 1 300 10 60 10000".into()),
+        ("appendonly".into(), "no".into()),
     ]
 }
 
@@ -546,8 +550,26 @@ fn matches_pattern(pattern: &str, key: &str) -> bool {
 mod tests {
     use super::*;
     use crate::protocol::{Frame, ProtocolVersion};
-    use std::thread::sleep;
-    use std::time::Duration;
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+
+    fn wait_for_expiration(storage: &Storage, key: &[u8]) {
+        let timeout = Duration::from_secs(1);
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if storage.get(key).is_none() {
+                return;
+            }
+            sleep(Duration::from_millis(5));
+        }
+        panic!(
+            "key {:?} did not expire within {:?}",
+            String::from_utf8_lossy(key),
+            timeout
+        );
+    }
 
     #[test]
     fn parse_set_get_command() {
@@ -709,7 +731,7 @@ mod tests {
         let storage = Storage::new();
         storage.set(b"temp".to_vec(), b"value".to_vec());
         assert!(storage.expire(b"temp", Duration::from_millis(5)));
-        sleep(Duration::from_millis(20));
+        wait_for_expiration(&storage, b"temp");
 
         let mut state = ConnectionState::default();
         let expire_cmd = Command {
@@ -995,5 +1017,28 @@ mod tests {
         } else {
             panic!("CLIENT LIST RESP2 should report a simple string");
         }
+    }
+
+    #[test]
+    fn matches_pattern_suffix_wildcard() {
+        assert!(matches_pattern("*name", "client.name"));
+        assert!(!matches_pattern("*name", "client.id"));
+    }
+
+    #[test]
+    fn matches_pattern_prefix_wildcard() {
+        assert!(matches_pattern("server.*", "server.port"));
+        assert!(!matches_pattern("server.*", "client.name"));
+    }
+
+    #[test]
+    fn matches_pattern_inner_wildcard() {
+        assert!(matches_pattern("*inner*", "begin_inner_end"));
+        assert!(!matches_pattern("*inner*", "prefixpost"));
+    }
+
+    #[test]
+    fn matches_pattern_empty() {
+        assert!(!matches_pattern("", "anything"));
     }
 }

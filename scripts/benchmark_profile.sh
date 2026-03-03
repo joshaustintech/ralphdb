@@ -158,7 +158,8 @@ finalize_metadata() {
 
   if [[ "${exit_status}" -eq 0 ]]; then
     exit_kind="success"
-  elif [[ "${exit_status}" -eq 124 ]]; then
+  elif ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
+    [[ "${exit_status}" -eq 124 || "${exit_status}" -eq 137 || "${exit_status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
     exit_kind="timeout"
   elif [[ "${exit_status}" -ge 128 ]]; then
     exit_kind="signal"
@@ -200,7 +201,7 @@ if ! "${resp3_probe_cmd[@]}" >/dev/null 2>&1; then
   echo "RESP3 benchmark preflight failed with exit ${resp3_probe_status}." >&2
   echo "Command: ${quoted_resp3_probe_cmd}" >&2
   echo "Verify redis-benchmark RESP3 support and endpoint compatibility before rerunning the full profile." >&2
-  exit 1
+  exit "${resp3_probe_status}"
 fi
 
 run_case() {
@@ -210,6 +211,7 @@ run_case() {
   local pipeline="$4"
   local repeat="$5"
   local proto_name="resp2"
+  local run_status
   local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
 
   run_or_report() {
@@ -248,20 +250,23 @@ run_case() {
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
 
   if [[ "${mode}" == "basic" ]]; then
-    if ! run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" -t set,get,incr; then
+    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" -t set,get,incr || {
+      run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
-      exit 1
-    fi
+      exit "${run_status}"
+    }
   elif [[ "${mode}" == "mget" ]]; then
-    if ! run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2; then
+    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2 || {
+      run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
-      exit 1
-    fi
+      exit "${run_status}"
+    }
   else
-    if ! run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2; then
+    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 || {
+      run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
-      exit 1
-    fi
+      exit "${run_status}"
+    }
   fi
 
   COMPLETED_RUNS=$((COMPLETED_RUNS + 1))

@@ -341,7 +341,14 @@ fn decode_verbatim<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
         ));
     }
 
-    let format = String::from_utf8_lossy(format_bytes).to_string();
+    let format = String::from_utf8(format_bytes.to_vec())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid verbatim format tag"))?;
+    if !format.is_ascii() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid verbatim format tag",
+        ));
+    }
     let payload = buffer[4..].to_vec();
 
     Ok(Frame::VerbatimString { format, payload })
@@ -618,6 +625,18 @@ mod tests {
     #[test]
     fn reject_verbatim_frame_missing_crlf() {
         let mut reader = Cursor::new(b"=6\r\ntxt:hi\rX");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_verbatim_frame_with_invalid_utf8_format() {
+        let mut reader = Cursor::new(b"=6\r\n\xFF\xFF\xFF:hi\r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
+    fn reject_verbatim_frame_with_non_ascii_format() {
+        let mut reader = Cursor::new(b"=7\r\n\xC2\xA2X:hi\r\n");
         assert!(decode_frame(&mut reader).is_err());
     }
 

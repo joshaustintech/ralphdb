@@ -179,6 +179,8 @@ metadata_finalized=0
 script_stage="preflight:connectivity"
 last_run_started_index=0
 last_run_started_label="none"
+last_run_completed_index=0
+last_run_completed_label="none"
 finalize_metadata() {
   local exit_status=$?
   local completion_state="incomplete"
@@ -218,6 +220,8 @@ finalize_metadata() {
       echo "script_stage=${script_stage}"
       echo "last_run_started_index=${last_run_started_index}"
       echo "last_run_started_label=${last_run_started_label}"
+      echo "last_run_completed_index=${last_run_completed_index}"
+      echo "last_run_completed_label=${last_run_completed_label}"
     } >>"${metadata_file}"
     metadata_finalized=1
   fi
@@ -366,6 +370,8 @@ run_case() {
   fi
 
   COMPLETED_RUNS=$((COMPLETED_RUNS + 1))
+  last_run_completed_index="${run_index}"
+  last_run_completed_label="${last_run_started_label}"
 }
 
 for mix in "${mix_entries[@]}"; do

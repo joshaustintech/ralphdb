@@ -203,6 +203,32 @@ To document stability and latency deltas in a PR:
 2. Run a `candidate` profile on your branch using the same machine/load conditions.
 3. Compare throughput and latency (`avg`, `p95`, `max`) for each matching file pair and report percentage deltas.
 
+Latest baseline/candidate snapshot (captured on 2026-03-03 with `REQUESTS=5000`, `REPEATS=1`, `MIXES="1:1 8:1"`):
+
+- Baseline: `benchmark-results/20260303-024854-baseline`
+- Candidate: `benchmark-results/20260303-024856-candidate`
+- Throughput delta range: `-8.70%` to `+12.75%`
+- Avg-latency delta range: `-13.64%` to `+11.76%`
+- p95-latency delta range: `-25.81%` to `+34.78%`
+- Max-latency delta range: `-35.63%` to `+90.57%`
+
+Per-workload delta summary (candidate vs baseline):
+
+| Workload file | Baseline rps | Candidate rps | rps delta | Baseline avg ms | Candidate avg ms | avg delta | Baseline p95 ms | Candidate p95 ms | p95 delta | Baseline max ms | Candidate max ms | max delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `resp2-basic-c1-p1-r1.txt` | 42464.78 | 45635.99 | +7.47% | 0.020 | 0.018 | -10.00% | 0.026 | 0.026 | +0.00% | 0.162 | 0.127 | -21.44% |
+| `resp2-basic-c8-p1-r1.txt` | 94362.02 | 93800.85 | -0.59% | 0.062 | 0.061 | -1.61% | 0.095 | 0.095 | +0.00% | 0.156 | 0.196 | +25.59% |
+| `resp2-mget-c1-p1-r1.txt` | 43859.65 | 44642.86 | +1.79% | 0.019 | 0.019 | +0.00% | 0.023 | 0.023 | +0.00% | 0.095 | 0.151 | +58.95% |
+| `resp2-mget-c8-p1-r1.txt` | 90909.09 | 92592.59 | +1.85% | 0.064 | 0.063 | -1.56% | 0.095 | 0.095 | +0.00% | 0.175 | 0.215 | +22.86% |
+| `resp2-mset-c1-p1-r1.txt` | 44247.79 | 44247.79 | +0.00% | 0.019 | 0.019 | +0.00% | 0.023 | 0.023 | +0.00% | 0.087 | 0.103 | +18.39% |
+| `resp2-mset-c8-p1-r1.txt` | 94339.62 | 92592.59 | -1.85% | 0.062 | 0.062 | +0.00% | 0.095 | 0.095 | +0.00% | 0.191 | 0.175 | -8.38% |
+| `resp3-basic-c1-p1-r1.txt` | 45531.35 | 44798.29 | -1.61% | 0.018 | 0.018 | +3.77% | 0.031 | 0.026 | -17.20% | 0.106 | 0.114 | +7.57% |
+| `resp3-basic-c8-p1-r1.txt` | 93174.93 | 90968.16 | -2.37% | 0.062 | 0.063 | +1.61% | 0.095 | 0.100 | +5.61% | 0.154 | 0.202 | +31.24% |
+| `resp3-mget-c1-p1-r1.txt` | 45871.56 | 44247.79 | -3.54% | 0.018 | 0.018 | +0.00% | 0.023 | 0.031 | +34.78% | 0.103 | 0.167 | +62.14% |
+| `resp3-mget-c8-p1-r1.txt` | 94339.62 | 89285.71 | -5.36% | 0.059 | 0.064 | +8.47% | 0.087 | 0.095 | +9.20% | 0.199 | 0.191 | -4.02% |
+| `resp3-mset-c1-p1-r1.txt` | 44247.79 | 43859.65 | -0.88% | 0.019 | 0.018 | -5.26% | 0.023 | 0.031 | +34.78% | 0.103 | 0.095 | -7.77% |
+| `resp3-mset-c8-p1-r1.txt` | 87719.30 | 92592.59 | +5.56% | 0.067 | 0.062 | -7.46% | 0.103 | 0.095 | -7.77% | 0.215 | 0.207 | -3.72% |
+
 ## Tests
 ```bash
 cargo test

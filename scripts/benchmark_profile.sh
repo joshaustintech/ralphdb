@@ -31,20 +31,22 @@ run_case() {
   local pipeline="$4"
   local repeat="$5"
   local proto_name="resp2"
+  local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
 
   if [[ "${protocol}" == "-3" ]]; then
     proto_name="resp3"
+    cmd_base+=( -3 )
   fi
 
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
 
   if [[ "${mode}" == "basic" ]]; then
-    redis-benchmark "${protocol}" -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}" -t set,get,incr >"${out_file}"
+    "${cmd_base[@]}" -t set,get,incr >"${out_file}"
   elif [[ "${mode}" == "mget" ]]; then
-    redis-benchmark "${protocol}" -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}" MGET bench:k1 bench:k2 >"${out_file}"
+    "${cmd_base[@]}" MGET bench:k1 bench:k2 >"${out_file}"
   else
-    redis-benchmark "${protocol}" -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}" MSET bench:k1 v1 bench:k2 v2 >"${out_file}"
+    "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 >"${out_file}"
   fi
 }
 

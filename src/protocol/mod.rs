@@ -557,6 +557,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_inline_command_with_mixed_whitespace_arguments() {
+        let mut reader = Cursor::new(b"SET\tkey   value\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Array(Some(elements)) if
+            matches!(elements.first(), Some(Frame::BulkString(Some(bytes))) if bytes == b"SET")
+                && matches!(elements.get(1), Some(Frame::BulkString(Some(bytes))) if bytes == b"key")
+                && matches!(elements.get(2), Some(Frame::BulkString(Some(bytes))) if bytes == b"value")
+                && elements.len() == 3
+        ));
+    }
+
+    #[test]
     fn reject_empty_inline_command() {
         let mut reader = Cursor::new(b"   \r\n");
         assert!(decode_frame(&mut reader).is_err());

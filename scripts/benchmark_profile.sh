@@ -30,7 +30,7 @@ REQUESTS_RAW="${REQUESTS:-10000}"
 REPEATS_RAW="${REPEATS:-3}"
 MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
 BENCH_TIMEOUT_SECONDS_RAW="${BENCH_TIMEOUT_SECONDS:-120}"
-LABEL="${1:-manual}"
+LABEL_RAW="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 SCRIPT_START_EPOCH="$(date +%s)"
 
@@ -58,6 +58,11 @@ fi
 BENCH_TIMEOUT_SECONDS="$(printf '%s' "${BENCH_TIMEOUT_SECONDS_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${BENCH_TIMEOUT_SECONDS}" ]]; then
   BENCH_TIMEOUT_SECONDS="120"
+fi
+
+LABEL="$(printf '%s' "${LABEL_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [[ -z "${LABEL}" ]]; then
+  LABEL="manual"
 fi
 
 if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || ((PORT > 65535)); then
@@ -119,7 +124,6 @@ if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
 fi
 
 TIMEOUT_BIN=""
-TIMEOUT_CMD=()
 TIMEOUT_PROBE_EXIT=""
 if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   if command -v timeout >/dev/null 2>&1; then
@@ -148,7 +152,6 @@ if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   fi
   TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
 
-  TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}")
 fi
 
 is_timeout_status() {
@@ -255,14 +258,19 @@ run_cli_preflight_or_report() {
   local status
   local output
   local quoted_cmd
-  local cmd=("${TIMEOUT_CMD[@]}" redis-cli --raw -h "${HOST}" -p "${PORT}" "$@")
+  local cmd=(redis-cli --raw -h "${HOST}" -p "${PORT}" "$@")
+
+  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+    cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${cmd[@]}")
+  fi
 
   if output="$("${cmd[@]}" 2>&1)"; then
     printf '%s' "${output}"
     return 0
+  else
+    status=$?
   fi
 
-  status=$?
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"
   if is_timeout_status "${status}"; then
     echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
@@ -327,7 +335,10 @@ if [[ "${seed_response}" != "OK" ]]; then
 fi
 
 script_stage="preflight:resp3_probe"
-resp3_probe_cmd=("${TIMEOUT_CMD[@]}" redis-benchmark -h "${HOST}" -p "${PORT}" -n 1 -c 1 -P 1 "${RESP3_FLAG}" -t ping)
+resp3_probe_cmd=(redis-benchmark -h "${HOST}" -p "${PORT}" -n 1 -c 1 -P 1 "${RESP3_FLAG}" -t ping)
+if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+  resp3_probe_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${resp3_probe_cmd[@]}")
+fi
 resp3_probe_output=""
 resp3_probe_status=0
 resp3_probe_output="$("${resp3_probe_cmd[@]}" 2>&1)" || resp3_probe_status=$?
@@ -357,6 +368,7 @@ run_case() {
   local proto_name="${protocol}"
   local run_status
   local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
+  local run_cmd=()
 
   run_or_report() {
     local out_file="$1"
@@ -395,19 +407,31 @@ run_case() {
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat} (run ${run_index}/${TOTAL_RUNS})"
 
   if [[ "${mode}" == "basic" ]]; then
-    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" -t set,get,incr || {
+    run_cmd=("${cmd_base[@]}" -t set,get,incr)
+    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    fi
+    run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit "${run_status}"
     }
   elif [[ "${mode}" == "mget" ]]; then
-    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2 || {
+    run_cmd=("${cmd_base[@]}" MGET bench:k1 bench:k2)
+    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    fi
+    run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit "${run_status}"
     }
   else
-    run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 || {
+    run_cmd=("${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2)
+    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    fi
+    run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit "${run_status}"

@@ -21,6 +21,19 @@ LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="benchmark-results/${STAMP}-${LABEL}"
 
+if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
+  echo "BENCH_TIMEOUT_SECONDS must be a non-negative integer (got: ${BENCH_TIMEOUT_SECONDS})." >&2
+  exit 1
+fi
+
+if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
+  ! command -v timeout >/dev/null 2>&1 &&
+  ! command -v gtimeout >/dev/null 2>&1; then
+  echo "BENCH_TIMEOUT_SECONDS is set but neither timeout nor gtimeout is installed." >&2
+  echo "Install one of them or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
+  exit 1
+fi
+
 mkdir -p "${OUT_DIR}"
 
 redis-cli -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 >/dev/null
@@ -46,10 +59,8 @@ run_case() {
   if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
     if command -v timeout >/dev/null 2>&1; then
       timeout_cmd=(timeout "${BENCH_TIMEOUT_SECONDS}")
-    elif command -v gtimeout >/dev/null 2>&1; then
-      timeout_cmd=(gtimeout "${BENCH_TIMEOUT_SECONDS}")
     else
-      echo "Warning: timeout disabled because neither timeout nor gtimeout is installed." >&2
+      timeout_cmd=(gtimeout "${BENCH_TIMEOUT_SECONDS}")
     fi
   fi
 

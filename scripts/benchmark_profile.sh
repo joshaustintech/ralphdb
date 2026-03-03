@@ -129,6 +129,24 @@ if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}")
 fi
 
+is_timeout_status() {
+  local status="$1"
+
+  if ((BENCH_TIMEOUT_SECONDS_NUM <= 0)); then
+    return 1
+  fi
+
+  if [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq 143 ]]; then
+    return 0
+  fi
+
+  if [[ -n "${TIMEOUT_PROBE_EXIT}" && "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 mkdir -p "${OUT_DIR}"
 
 metadata_file="${OUT_DIR}/run-metadata.txt"
@@ -178,8 +196,7 @@ finalize_metadata() {
 
   if [[ "${exit_status}" -eq 0 ]]; then
     exit_kind="success"
-  elif ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
-    [[ "${exit_status}" -eq 124 || "${exit_status}" -eq 137 || "${exit_status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+  elif is_timeout_status "${exit_status}"; then
     exit_kind="timeout"
   elif [[ "${exit_status}" -ge 128 ]]; then
     exit_kind="signal"
@@ -221,8 +238,7 @@ run_cli_preflight_or_report() {
 
   status=$?
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"
-  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
-    [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+  if is_timeout_status "${status}"; then
     echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
   else
     echo "Preflight '${preflight_name}' failed with exit ${status}." >&2
@@ -266,8 +282,7 @@ resp3_probe_output=""
 if ! resp3_probe_output="$("${resp3_probe_cmd[@]}" 2>&1)"; then
   resp3_probe_status=$?
   quoted_resp3_probe_cmd="$(printf '%q ' "${resp3_probe_cmd[@]}")"
-  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
-    [[ "${resp3_probe_status}" -eq 124 || "${resp3_probe_status}" -eq 137 || "${resp3_probe_status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+  if is_timeout_status "${resp3_probe_status}"; then
     echo "RESP3 benchmark preflight timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${resp3_probe_status})." >&2
   else
     echo "RESP3 benchmark preflight failed with exit ${resp3_probe_status}." >&2
@@ -303,8 +318,7 @@ run_case() {
       local quoted_cmd
       quoted_cmd="$(printf '%q ' "$@")"
 
-      if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
-        [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+      if is_timeout_status "${status}"; then
         echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
       else
         echo "Benchmark command failed with exit ${status}." >&2

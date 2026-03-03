@@ -204,7 +204,7 @@ fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
                 (Frame::SimpleString("proto".into()), Frame::Integer(3)),
                 (
                     Frame::SimpleString("id".into()),
-                    Frame::SimpleString(env!("CARGO_PKG_NAME").into()),
+                    Frame::Integer(state.client_id),
                 ),
                 (
                     Frame::SimpleString("mode".into()),
@@ -663,8 +663,8 @@ mod tests {
                         assert_eq!(value, 3);
                         has_proto = true;
                     }
-                    (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "id" => {
-                        assert_eq!(value, env!("CARGO_PKG_NAME"));
+                    (Frame::SimpleString(key), Frame::Integer(value)) if key == "id" => {
+                        assert_eq!(value, state.client_id);
                         has_id = true;
                     }
                     (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "mode" => {

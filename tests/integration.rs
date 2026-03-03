@@ -131,8 +131,8 @@ fn assert_hello3_map(frame: Frame) {
                     assert_eq!(value, 3);
                     saw_proto = true;
                 }
-                (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "id" => {
-                    assert_eq!(value, env!("CARGO_PKG_NAME"));
+                (Frame::SimpleString(key), Frame::Integer(value)) if key == "id" => {
+                    assert!(value > 0);
                     saw_id = true;
                 }
                 (Frame::SimpleString(key), Frame::SimpleString(value)) if key == "mode" => {

@@ -174,6 +174,10 @@ fn echo(args: &[Vec<u8>]) -> CommandResult {
 }
 
 fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
+    if args.len() > 1 {
+        return CommandResult::error("ERR wrong number of arguments for 'hello' command");
+    }
+
     let version = if let Some(version_value) = args.first() {
         std::str::from_utf8(version_value)
             .ok()
@@ -711,6 +715,23 @@ mod tests {
         let result = execute(&hello_cmd, &storage, &mut state);
         assert_eq!(state.protocol, ProtocolVersion::Resp2);
         assert!(matches!(result.response, Frame::SimpleString(ref value) if value == "OK"));
+    }
+
+    #[test]
+    fn hello_rejects_extra_arguments() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![b"3".to_vec(), b"ignored".to_vec()],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+
+        assert!(matches!(
+            result.response,
+            Frame::Error(ref value) if value == "ERR wrong number of arguments for 'hello' command"
+        ));
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
     }
 
     #[test]

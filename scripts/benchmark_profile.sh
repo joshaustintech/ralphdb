@@ -20,6 +20,16 @@ BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
+if [[ -z "${HOST}" ]]; then
+  echo "HOST must be a non-empty hostname or IP address." >&2
+  exit 1
+fi
+
+if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || ((PORT > 65535)); then
+  echo "PORT must be an integer between 1 and 65535 (got: ${PORT})." >&2
+  exit 1
+fi
+
 if ! [[ "${LABEL}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Label must contain only letters, numbers, dot, underscore, or dash (got: ${LABEL})." >&2
   exit 1

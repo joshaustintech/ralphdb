@@ -117,12 +117,20 @@ PROTOCOL_COUNT="${#PROTOCOLS[@]}"
 TOTAL_RUNS=$((MIX_COUNT * REPEATS * MODE_COUNT * PROTOCOL_COUNT))
 COMPLETED_RUNS=0
 
+normalized_mix_entries=()
 for mix in "${mix_entries[@]}"; do
   if ! [[ "${mix}" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
     echo "Invalid MIXES entry '${mix}'. Expected clients:pipeline with positive integers (example: 32:1)." >&2
     exit 1
   fi
+  mix_clients="${mix%%:*}"
+  mix_pipeline="${mix##*:}"
+  mix_clients="$((10#${mix_clients}))"
+  mix_pipeline="$((10#${mix_pipeline}))"
+  normalized_mix_entries+=("${mix_clients}:${mix_pipeline}")
 done
+MIXES="${normalized_mix_entries[*]}"
+mix_entries=("${normalized_mix_entries[@]}")
 
 if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
   ! command -v timeout >/dev/null 2>&1 &&

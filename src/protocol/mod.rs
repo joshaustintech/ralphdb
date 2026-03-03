@@ -122,9 +122,15 @@ pub fn decode_frame<R: BufRead>(reader: &mut R) -> io::Result<Frame> {
             Ok(Frame::Double(value))
         }
         b'_' => {
-            // Null value
-            let _ = read_line(reader)?;
-            Ok(Frame::Null)
+            let line = read_line(reader)?;
+            if line.is_empty() {
+                Ok(Frame::Null)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid null frame",
+                ))
+            }
         }
         b'%' => decode_map(reader),
         b'~' => decode_set(reader),
@@ -839,6 +845,12 @@ mod tests {
         let mut buffer = Vec::new();
         encode_frame(&Frame::Null, ProtocolVersion::Resp3, &mut buffer).unwrap();
         assert_eq!(buffer, b"_\r\n");
+    }
+
+    #[test]
+    fn reject_invalid_null_frame() {
+        let mut reader = Cursor::new(b"_oops\r\n");
+        assert!(decode_frame(&mut reader).is_err());
     }
 
     #[test]

@@ -107,6 +107,11 @@ if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
     echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
   fi
+  if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -ne 137 ]]; then
+    echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status} (expected timeout exit 124 or 137)." >&2
+    echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
+    exit 1
+  fi
 
   TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}")
 fi

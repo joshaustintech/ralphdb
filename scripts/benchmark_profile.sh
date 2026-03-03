@@ -32,6 +32,7 @@ MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
 BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+SCRIPT_START_EPOCH="$(date +%s)"
 
 if [[ -z "${HOST}" ]]; then
   echo "HOST must be a non-empty hostname or IP address." >&2
@@ -153,6 +154,11 @@ finalize_metadata() {
   local completion_state="incomplete"
   local runs_remaining=$((TOTAL_RUNS - COMPLETED_RUNS))
   local exit_kind="failure"
+  local completion_timestamp
+  local elapsed_seconds
+
+  completion_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  elapsed_seconds=$(( $(date +%s) - SCRIPT_START_EPOCH ))
 
   if ((COMPLETED_RUNS >= TOTAL_RUNS)); then
     completion_state="complete"
@@ -178,6 +184,8 @@ finalize_metadata() {
       echo "run_completion_state=${completion_state}"
       echo "script_exit_kind=${exit_kind}"
       echo "script_exit_status=${exit_status}"
+      echo "completion_timestamp=${completion_timestamp}"
+      echo "elapsed_seconds=${elapsed_seconds}"
       echo "script_stage=${script_stage}"
       echo "last_run_started_index=${last_run_started_index}"
       echo "last_run_started_label=${last_run_started_label}"

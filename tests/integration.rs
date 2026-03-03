@@ -515,11 +515,20 @@ fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
     let unsupported_frames = vec![
         Frame::Boolean(true),
         Frame::Double(std::f64::consts::PI),
+        Frame::BigNumber("9007199254740992".into()),
+        Frame::VerbatimString {
+            format: "txt".into(),
+            payload: b"payload".to_vec(),
+        },
         Frame::Map(Some(vec![(
             Frame::SimpleString("meta".into()),
             Frame::SimpleString("value".into()),
         )])),
         Frame::Set(Some(vec![Frame::SimpleString("member".into())])),
+        Frame::Attribute(vec![(
+            Frame::SimpleString("foo".into()),
+            Frame::SimpleString("bar".into()),
+        )]),
         Frame::Push(vec![Frame::SimpleString("element".into())]),
     ];
 

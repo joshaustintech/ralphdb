@@ -21,10 +21,32 @@ LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="benchmark-results/${STAMP}-${LABEL}"
 
+if ! [[ "${REQUESTS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "REQUESTS must be a positive integer (got: ${REQUESTS})." >&2
+  exit 1
+fi
+
+if ! [[ "${REPEATS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "REPEATS must be a positive integer (got: ${REPEATS})." >&2
+  exit 1
+fi
+
 if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
   echo "BENCH_TIMEOUT_SECONDS must be a non-negative integer (got: ${BENCH_TIMEOUT_SECONDS})." >&2
   exit 1
 fi
+
+if [[ -z "${MIXES//[[:space:]]/}" ]]; then
+  echo "MIXES must include at least one clients:pipeline entry (for example: 1:1 8:1)." >&2
+  exit 1
+fi
+
+for mix in ${MIXES}; do
+  if ! [[ "${mix}" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
+    echo "Invalid MIXES entry '${mix}'. Expected clients:pipeline with positive integers (example: 32:1)." >&2
+    exit 1
+  fi
+done
 
 if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
   ! command -v timeout >/dev/null 2>&1 &&

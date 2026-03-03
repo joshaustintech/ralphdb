@@ -74,14 +74,18 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
-if ! redis-cli -h "${HOST}" -p "${PORT}" PING >/dev/null 2>&1; then
-  echo "Unable to reach Redis endpoint at ${HOST}:${PORT}." >&2
+ping_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" PING 2>&1 || true)"
+if [[ "${ping_output}" != "PONG" ]]; then
+  echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
+  echo "Expected response: PONG; received: ${ping_output}" >&2
   echo "Run the server first (for example: cargo run --release) or set HOST/PORT to a reachable endpoint." >&2
   exit 1
 fi
 
-if ! redis-cli -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 >/dev/null 2>&1; then
+seed_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 2>&1 || true)"
+if [[ "${seed_output}" != "OK" ]]; then
   echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
+  echo "Expected response: OK; received: ${seed_output}" >&2
   echo "Verify the server is writable and reachable before rerunning the profile." >&2
   exit 1
 fi

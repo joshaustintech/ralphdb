@@ -71,6 +71,9 @@ if [[ -z "${MIXES//[[:space:]]/}" ]]; then
 fi
 
 read -r -a mix_entries <<<"${MIXES}"
+MIX_COUNT="${#mix_entries[@]}"
+TOTAL_RUNS=$((MIX_COUNT * REPEATS * 6))
+COMPLETED_RUNS=0
 
 for mix in "${mix_entries[@]}"; do
   if ! [[ "${mix}" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
@@ -133,6 +136,8 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
   echo "timeout_bin=${TIMEOUT_BIN:-disabled}"
   echo "timeout_probe_exit=${TIMEOUT_PROBE_EXIT:-disabled}"
   echo "resp3_flag=${RESP3_FLAG}"
+  echo "mix_count=${MIX_COUNT}"
+  echo "total_runs_expected=${TOTAL_RUNS}"
   echo "redis_benchmark=$(redis-benchmark --version 2>&1 | head -n 1)"
   echo "redis_cli=$(redis-cli --version 2>&1 | head -n 1)"
 } >"${metadata_file}"
@@ -223,6 +228,8 @@ run_case() {
       exit 1
     fi
   fi
+
+  COMPLETED_RUNS=$((COMPLETED_RUNS + 1))
 }
 
 for mix in "${mix_entries[@]}"; do
@@ -238,10 +245,13 @@ for mix in "${mix_entries[@]}"; do
   done
 done
 
+echo "total_runs_completed=${COMPLETED_RUNS}" >>"${metadata_file}"
+
 cat <<EOF
 Saved profile results to ${OUT_DIR}
 Run metadata: ${metadata_file}
 Mixes: ${MIXES}
 Requests per run: ${REQUESTS}
 Repeats per mix/protocol/mode: ${REPEATS}
+Completed runs: ${COMPLETED_RUNS}/${TOTAL_RUNS}
 EOF

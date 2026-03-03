@@ -557,6 +557,12 @@ mod tests {
     }
 
     #[test]
+    fn reject_empty_inline_command() {
+        let mut reader = Cursor::new(b"   \r\n");
+        assert!(decode_frame(&mut reader).is_err());
+    }
+
+    #[test]
     fn parse_bulk_string() {
         let mut reader = Cursor::new(b"$3\r\nfoo\r\n");
         let frame = decode_frame(&mut reader).unwrap();

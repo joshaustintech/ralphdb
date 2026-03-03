@@ -124,11 +124,15 @@ redis-cli -p 6379 INFO
 
 ## Benchmarks (redis-benchmark)
 
-Run two representative workloads against a locally running server:
+Run representative workloads against a locally running server:
 
 ```bash
 redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 100 -c 1
 redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10
+redis-benchmark -h 127.0.0.1 -p 6379 -t incr -n 200 -c 1
+redis-cli -p 6379 MSET bench:k1 v1 bench:k2 v2
+redis-benchmark -h 127.0.0.1 -p 6379 -n 200 -c 1 MGET bench:k1 bench:k2
+redis-benchmark -h 127.0.0.1 -p 6379 -n 200 -c 1 MSET bench:k1 v1 bench:k2 v2
 ```
 
 Sample results from the runs above:
@@ -139,6 +143,12 @@ Sample results from the runs above:
 - `redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10`  
   SET: 66,666.66 requests per second (avg latency 0.075 ms, max 0.119 ms)  
   GET: 99,999.99 requests per second (avg latency 0.065 ms, max 0.087 ms)
+- `redis-benchmark -h 127.0.0.1 -p 6379 -t incr -n 200 -c 1`  
+  INCR: 8,333.33 requests per second (avg latency 0.108 ms, p95 0.143 ms, max 0.151 ms)
+- `redis-benchmark -h 127.0.0.1 -p 6379 -n 200 -c 1 MGET bench:k1 bench:k2`  
+  MGET: 22,222.22 requests per second (avg latency 0.036 ms, p95 0.071 ms, max 0.151 ms)
+- `redis-benchmark -h 127.0.0.1 -p 6379 -n 200 -c 1 MSET bench:k1 v1 bench:k2 v2`  
+  MSET: 40,000.00 requests per second (avg latency 0.020 ms, p95 0.023 ms, max 0.119 ms)
 
 Validation note: `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) while benchmarking.
 

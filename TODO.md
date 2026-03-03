@@ -3,4 +3,4 @@ WIGGUM_REMAINING_WORK=yes
 
 Are there important TODO items not yet captured? Yes.
 
-- [ ] Expand benchmark coverage in `README.md` to include `INCR`, `MGET`, and `MSET` command lines with validated sample results.
+- [ ] Add RESP3 benchmark coverage (`redis-benchmark -3`) for `GET`, `SET`, `INCR`, `MGET`, and `MSET` with validated sample results in `README.md`.

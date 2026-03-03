@@ -64,7 +64,11 @@ if ! redis-cli -h "${HOST}" -p "${PORT}" PING >/dev/null 2>&1; then
   exit 1
 fi
 
-redis-cli -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 >/dev/null
+if ! redis-cli -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 >/dev/null 2>&1; then
+  echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
+  echo "Verify the server is writable and reachable before rerunning the profile." >&2
+  exit 1
+fi
 
 run_case() {
   local protocol="$1"

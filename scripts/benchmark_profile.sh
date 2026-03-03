@@ -143,6 +143,7 @@ fi
 TIMEOUT_BIN=""
 TIMEOUT_PROBE_EXIT=""
 timeout_probe_status=0
+timeout_probe_output=""
 if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
@@ -150,20 +151,25 @@ if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
     TIMEOUT_BIN="gtimeout"
   fi
 
-  if "${TIMEOUT_BIN}" 1 sh -c "sleep 2" >/dev/null 2>&1; then
+  timeout_probe_output="$("${TIMEOUT_BIN}" 1 sh -c "sleep 2" 2>&1)" || timeout_probe_status=$?
+  if [[ "${timeout_probe_status}" -eq 0 ]]; then
     echo "${TIMEOUT_BIN} completed a timeout probe without timing out." >&2
     echo "Verify ${TIMEOUT_BIN} is functioning correctly or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
-  else
-    timeout_probe_status=$?
   fi
   if [[ "${timeout_probe_status}" -eq 125 || "${timeout_probe_status}" -eq 126 || "${timeout_probe_status}" -eq 127 ]]; then
     echo "${TIMEOUT_BIN} failed timeout probing with exit ${timeout_probe_status}." >&2
+    if [[ -n "${timeout_probe_output}" ]]; then
+      echo "Probe output: ${timeout_probe_output}" >&2
+    fi
     echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
   fi
   if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -lt 128 ]]; then
     echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status}." >&2
+    if [[ -n "${timeout_probe_output}" ]]; then
+      echo "Probe output: ${timeout_probe_output}" >&2
+    fi
     echo "Expected a timeout status (124 or signal-based >=128)." >&2
     echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1

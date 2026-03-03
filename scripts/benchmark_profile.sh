@@ -24,7 +24,7 @@ if ! command -v redis-cli >/dev/null 2>&1; then
   exit 1
 fi
 
-HOST="${HOST:-127.0.0.1}"
+HOST_RAW="${HOST:-127.0.0.1}"
 PORT="${PORT:-6379}"
 REQUESTS="${REQUESTS:-10000}"
 REPEATS="${REPEATS:-3}"
@@ -34,9 +34,10 @@ LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 SCRIPT_START_EPOCH="$(date +%s)"
 
+# Trim HOST so whitespace-only values don't pass validation and cause opaque connection errors.
+HOST="$(printf '%s' "${HOST_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${HOST}" ]]; then
-  echo "HOST must be a non-empty hostname or IP address." >&2
-  exit 1
+  HOST="127.0.0.1"
 fi
 
 if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || ((PORT > 65535)); then

@@ -255,15 +255,33 @@ run_cli_preflight_or_report() {
   return "${status}"
 }
 
+last_non_empty_line() {
+  local input="$1"
+  local line
+  local last=""
+
+  while IFS= read -r line; do
+    if [[ -n "${line//[[:space:]]/}" ]]; then
+      last="${line}"
+    fi
+  done <<<"${input}"
+
+  printf '%s' "${last}"
+}
+
 script_stage="preflight:connectivity"
 ping_status=0
 ping_output="$(run_cli_preflight_or_report "connectivity" PING)" || ping_status=$?
 if ((ping_status != 0)); then
   exit "${ping_status}"
 fi
-if [[ "${ping_output}" != "PONG" ]]; then
+ping_response="$(last_non_empty_line "${ping_output}")"
+if [[ "${ping_response}" != "PONG" ]]; then
   echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
-  echo "Expected response: PONG; received: ${ping_output}" >&2
+  echo "Expected response: PONG; last response line: ${ping_response}" >&2
+  if [[ "${ping_output}" != "${ping_response}" ]]; then
+    echo "Full preflight output: ${ping_output}" >&2
+  fi
   echo "Run the server first (for example: cargo run --release) or set HOST/PORT to a reachable endpoint." >&2
   exit 1
 fi
@@ -274,9 +292,13 @@ seed_output="$(run_cli_preflight_or_report "seed" MSET bench:k1 v1 bench:k2 v2)"
 if ((seed_status != 0)); then
   exit "${seed_status}"
 fi
-if [[ "${seed_output}" != "OK" ]]; then
+seed_response="$(last_non_empty_line "${seed_output}")"
+if [[ "${seed_response}" != "OK" ]]; then
   echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
-  echo "Expected response: OK; received: ${seed_output}" >&2
+  echo "Expected response: OK; last response line: ${seed_response}" >&2
+  if [[ "${seed_output}" != "${seed_response}" ]]; then
+    echo "Full preflight output: ${seed_output}" >&2
+  fi
   echo "Verify the server is writable and reachable before rerunning the profile." >&2
   exit 1
 fi

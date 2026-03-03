@@ -41,7 +41,7 @@ impl Config {
         const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
         let idle_timeout = match std::env::var("RALPHDB_IDLE_TIMEOUT_SECS")
             .ok()
-            .and_then(|value| value.parse::<i64>().ok())
+            .and_then(|value| value.trim().parse::<i64>().ok())
         {
             Some(0) => None,
             Some(secs) if secs > 0 => Some(Duration::from_secs(secs as u64)),
@@ -263,5 +263,12 @@ mod tests {
         let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some("-1"));
         let config = Config::from_env();
         assert_eq!(config.idle_timeout(), Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn idle_timeout_trims_whitespace_wrapped_values() {
+        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some(" 15 "));
+        let config = Config::from_env();
+        assert_eq!(config.idle_timeout(), Some(Duration::from_secs(15)));
     }
 }

@@ -142,6 +142,19 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
   echo "redis_cli=$(redis-cli --version 2>&1 | head -n 1)"
 } >"${metadata_file}"
 
+metadata_finalized=0
+finalize_metadata() {
+  local exit_status=$?
+  if [[ "${metadata_finalized}" == "0" ]]; then
+    {
+      echo "total_runs_completed=${COMPLETED_RUNS}"
+      echo "script_exit_status=${exit_status}"
+    } >>"${metadata_file}"
+    metadata_finalized=1
+  fi
+}
+trap finalize_metadata EXIT
+
 ping_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" PING 2>&1 || true)"
 if [[ "${ping_output}" != "PONG" ]]; then
   echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
@@ -244,8 +257,6 @@ for mix in "${mix_entries[@]}"; do
     run_case "resp3" "mset" "${clients}" "${pipeline}" "${repeat}"
   done
 done
-
-echo "total_runs_completed=${COMPLETED_RUNS}" >>"${metadata_file}"
 
 cat <<EOF
 Saved profile results to ${OUT_DIR}

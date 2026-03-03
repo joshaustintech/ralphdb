@@ -139,7 +139,7 @@ run_case() {
 for mix in ${MIXES}; do
   clients="${mix%%:*}"
   pipeline="${mix##*:}"
-  for repeat in $(seq 1 "${REPEATS}"); do
+  for ((repeat = 1; repeat <= REPEATS; repeat++)); do
     run_case "" "basic" "${clients}" "${pipeline}" "${repeat}"
     run_case "" "mget" "${clients}" "${pipeline}" "${repeat}"
     run_case "" "mset" "${clients}" "${pipeline}" "${repeat}"

@@ -82,7 +82,9 @@ impl Storage {
     }
 
     pub fn expire(&self, key: &[u8], duration: Duration) -> bool {
-        let expiry = Instant::now() + duration;
+        let Some(expiry) = Instant::now().checked_add(duration) else {
+            return false;
+        };
         if let Some(mut entry) = self.inner.get_mut(key) {
             if entry.expired() {
                 drop(entry);
@@ -206,6 +208,14 @@ mod tests {
         wait_for_removal(&storage, b"temp");
         assert!(!storage.expire(b"temp", Duration::from_secs(1)));
         assert_eq!(storage.get(b"temp"), None);
+    }
+
+    #[test]
+    fn expire_with_unrepresentable_deadline_returns_false() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        assert!(!storage.expire(b"temp", Duration::MAX));
+        assert_eq!(storage.get(b"temp"), Some(b"value".to_vec()));
     }
 
     #[test]

@@ -244,17 +244,13 @@ finalize_metadata() {
   local exit_kind="failure"
   local completion_timestamp
   local elapsed_seconds
-  local sanitized_script_stage
   local sanitized_last_run_started_label
   local sanitized_last_run_completed_label
   local sanitized_failure_context
+  local sanitized_script_stage
 
   completion_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   elapsed_seconds=$(( $(date +%s) - SCRIPT_START_EPOCH ))
-  sanitized_script_stage="$(sanitize_metadata_value "${script_stage}")"
-  sanitized_last_run_started_label="$(sanitize_metadata_value "${last_run_started_label}")"
-  sanitized_last_run_completed_label="$(sanitize_metadata_value "${last_run_completed_label}")"
-  sanitized_failure_context="$(sanitize_metadata_value "${failure_context}")"
 
   if ((COMPLETED_RUNS >= TOTAL_RUNS)); then
     completion_state="complete"
@@ -273,6 +269,10 @@ finalize_metadata() {
     if [[ "${exit_status}" -eq 0 ]]; then
       script_stage="complete"
     fi
+    sanitized_script_stage="$(sanitize_metadata_value "${script_stage}")"
+    sanitized_last_run_started_label="$(sanitize_metadata_value "${last_run_started_label}")"
+    sanitized_last_run_completed_label="$(sanitize_metadata_value "${last_run_completed_label}")"
+    sanitized_failure_context="$(sanitize_metadata_value "${failure_context}")"
     {
       echo "total_runs_completed=${COMPLETED_RUNS}"
       echo "total_runs_remaining=${runs_remaining}"

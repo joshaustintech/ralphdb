@@ -270,7 +270,9 @@ fn incr(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
 
     match storage.incr(&args[0]) {
         Ok(value) => CommandResult::ok(Frame::Integer(value)),
-        Err(StorageError::InvalidInteger) => CommandResult::error("ERR value is not an integer"),
+        Err(StorageError::InvalidInteger | StorageError::IntegerOutOfRange) => {
+            CommandResult::error("ERR value is not an integer or out of range")
+        }
     }
 }
 
@@ -281,7 +283,9 @@ fn decr(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
 
     match storage.decr(&args[0]) {
         Ok(value) => CommandResult::ok(Frame::Integer(value)),
-        Err(StorageError::InvalidInteger) => CommandResult::error("ERR value is not an integer"),
+        Err(StorageError::InvalidInteger | StorageError::IntegerOutOfRange) => {
+            CommandResult::error("ERR value is not an integer or out of range")
+        }
     }
 }
 
@@ -1055,5 +1059,20 @@ mod tests {
     #[test]
     fn matches_pattern_empty() {
         assert!(!matches_pattern("", "anything"));
+    }
+
+    #[test]
+    fn incr_reports_error_when_integer_would_overflow() {
+        let storage = Storage::new();
+        storage.set(b"counter".to_vec(), i64::MAX.to_string().into_bytes());
+        let mut state = ConnectionState::default();
+        let cmd = Command {
+            name: "INCR".into(),
+            args: vec![b"counter".to_vec()],
+        };
+        let result = execute(&cmd, &storage, &mut state);
+        assert!(
+            matches!(result.response, Frame::Error(ref message) if message.contains("out of range"))
+        );
     }
 }

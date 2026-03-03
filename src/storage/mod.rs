@@ -28,6 +28,7 @@ impl Entry {
 #[derive(Debug)]
 pub enum StorageError {
     InvalidInteger,
+    IntegerOutOfRange,
 }
 
 pub struct Storage {
@@ -129,7 +130,9 @@ impl Storage {
         let current = current
             .parse::<i64>()
             .map_err(|_| StorageError::InvalidInteger)?;
-        let updated = current + delta;
+        let updated = current
+            .checked_add(delta)
+            .ok_or(StorageError::IntegerOutOfRange)?;
         entry.value = updated.to_string().into_bytes();
         Ok(updated)
     }
@@ -203,5 +206,15 @@ mod tests {
         storage.set(b"counter".to_vec(), b"5".to_vec());
         assert_eq!(storage.incr(b"counter").unwrap(), 6);
         assert_eq!(storage.decr(b"counter").unwrap(), 5);
+    }
+
+    #[test]
+    fn incr_overflow_returns_error() {
+        let storage = Storage::new();
+        storage.set(b"counter".to_vec(), i64::MAX.to_string().into_bytes());
+        assert!(matches!(
+            storage.incr(b"counter"),
+            Err(StorageError::IntegerOutOfRange)
+        ));
     }
 }

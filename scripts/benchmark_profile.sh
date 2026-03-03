@@ -89,6 +89,7 @@ fi
 
 TIMEOUT_BIN=""
 TIMEOUT_CMD=()
+TIMEOUT_PROBE_EXIT=""
 if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
@@ -107,11 +108,13 @@ if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
     echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
   fi
-  if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -ne 137 ]]; then
-    echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status} (expected timeout exit 124 or 137)." >&2
+  if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -lt 128 ]]; then
+    echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status}." >&2
+    echo "Expected a timeout status (124 or signal-based >=128)." >&2
     echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
   fi
+  TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
 
   TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}")
 fi
@@ -155,7 +158,8 @@ run_case() {
     local quoted_cmd
     quoted_cmd="$(printf '%q ' "$@")"
 
-    if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] && [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
+    if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
+      [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
       echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
     else
       echo "Benchmark command failed with exit ${status}." >&2

@@ -576,6 +576,18 @@ mod tests {
     }
 
     #[test]
+    fn reject_truncated_composite_frames() {
+        let mut map_reader = Cursor::new(b"%1\r\n+foo\r\n");
+        assert!(decode_frame(&mut map_reader).is_err());
+
+        let mut set_reader = Cursor::new(b"~2\r\n+foo\r\n");
+        assert!(decode_frame(&mut set_reader).is_err());
+
+        let mut push_reader = Cursor::new(b">2\r\n+foo\r\n");
+        assert!(decode_frame(&mut push_reader).is_err());
+    }
+
+    #[test]
     fn parse_verbatim_frame() {
         let mut reader = Cursor::new(b"=9\r\ntxt:hello\r\n");
         let frame = decode_frame(&mut reader).unwrap();

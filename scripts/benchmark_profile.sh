@@ -222,6 +222,7 @@ run_case() {
   local clients="$3"
   local pipeline="$4"
   local repeat="$5"
+  local run_index=$((COMPLETED_RUNS + 1))
   local proto_name="resp2"
   local run_status
   local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
@@ -259,10 +260,10 @@ run_case() {
   fi
 
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
-  last_run_started_index=$((COMPLETED_RUNS + 1))
+  last_run_started_index="${run_index}"
   last_run_started_label="${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
-  script_stage="benchmark:${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
-  echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
+  script_stage="benchmark:run${run_index}of${TOTAL_RUNS}:${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
+  echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat} (run ${run_index}/${TOTAL_RUNS})"
 
   if [[ "${mode}" == "basic" ]]; then
     run_or_report "${out_file}" "${TIMEOUT_CMD[@]}" "${cmd_base[@]}" -t set,get,incr || {

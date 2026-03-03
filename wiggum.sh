@@ -8,6 +8,9 @@ SLEEP_SECS="${SLEEP_SECS:-90}"
 DEFAULT_GREEN_CMD="RUSTFLAGS='-D warnings' cargo build --all-targets --all-features && RUSTFLAGS='-D warnings' cargo test --all-targets --all-features && cargo clippy --all-targets --all-features -- -D warnings"
 GREEN_CMD="${GREEN_CMD:-$DEFAULT_GREEN_CMD}"
 MAX_ITERS="${MAX_ITERS:-}"
+TODO_FILE="${TODO_FILE:-TODO.md}"
+TODO_MARKER_KEY="${TODO_MARKER_KEY:-WIGGUM_REMAINING_WORK}"
+REQUIRE_TODO_GREEN="${REQUIRE_TODO_GREEN:-1}"
 
 usage() {
   cat <<'EOF'
@@ -21,6 +24,38 @@ Options:
   --effort LEVEL      model_reasoning_effort value (default: medium).
   -h, --help          Show this help.
 EOF
+}
+
+todo_is_green() {
+  if [ "$REQUIRE_TODO_GREEN" != "1" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$TODO_FILE" ]; then
+    return 0
+  fi
+
+  marker_line="$(rg -N "^${TODO_MARKER_KEY}=(yes|no)$" "$TODO_FILE" | tail -n 1 || true)"
+  [ "$marker_line" = "${TODO_MARKER_KEY}=no" ]
+}
+
+run_green_check() {
+  eval "$GREEN_CMD" && todo_is_green
+}
+
+todo_status_details() {
+  if [ ! -f "$TODO_FILE" ]; then
+    echo "TODO file '$TODO_FILE' not found."
+    return
+  fi
+  marker_line="$(rg -N "^${TODO_MARKER_KEY}=(yes|no)$" "$TODO_FILE" | tail -n 1 || true)"
+  if [ -n "$marker_line" ]; then
+    echo "Marker: $marker_line"
+  else
+    echo "Marker: missing (${TODO_MARKER_KEY}=yes|no required)"
+  fi
+  echo "TODO tail:"
+  tail -n 40 "$TODO_FILE"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -69,6 +104,9 @@ fi
 
 echo "Starting Wiggum loop (max iterations: $MAX_ITERS)"
 echo "Green condition: $GREEN_CMD"
+if [ "$REQUIRE_TODO_GREEN" = "1" ]; then
+  echo "TODO gate: enabled (${TODO_FILE}, marker ${TODO_MARKER_KEY}=yes|no)"
+fi
 
 iteration=1
 
@@ -78,7 +116,7 @@ while [ "$iteration" -le "$MAX_ITERS" ]; do
 
   green_log="$(mktemp)"
 
-  if eval "$GREEN_CMD" >"$green_log" 2>&1; then
+  if run_green_check >"$green_log" 2>&1; then
     echo "Green condition satisfied before iteration work. Stopping."
     rm -f "$green_log"
     exit 0
@@ -86,6 +124,7 @@ while [ "$iteration" -le "$MAX_ITERS" ]; do
 
   green_tail="$(tail -n 120 "$green_log")"
   git_status="$(git status --short | sed -n '1,40p')"
+  todo_snapshot="$(todo_status_details)"
   rm -f "$green_log"
 
   prompt="$(cat <<EOF
@@ -101,12 +140,20 @@ Goal:
 - Follow AGENTS.md exactly.
 - Keep scope small and verifiable.
 - Run formatting/tests/checks relevant to the change.
+- Update $TODO_FILE at the end of your work:
+  - Keep/insert exactly one marker line: ${TODO_MARKER_KEY}=yes or ${TODO_MARKER_KEY}=no
+  - Set to "yes" if any meaningful work remains for this repository.
+  - Set to "no" only when no meaningful next engineering tasks remain.
+  - Maintain a short checklist of remaining items when marker is "yes".
 
 Current git status (trimmed):
 $git_status
 
 Recent green-condition output (tail):
 $green_tail
+
+TODO status snapshot:
+$todo_snapshot
 EOF
 )"
 
@@ -122,10 +169,13 @@ done
 
 echo
 echo "Reached MAX_ITERS=$MAX_ITERS. Running final green check..."
-if eval "$GREEN_CMD"; then
+if run_green_check; then
   echo "Green condition satisfied."
   exit 0
 fi
 
 echo "Green condition not satisfied after MAX_ITERS=$MAX_ITERS."
+if [ "$REQUIRE_TODO_GREEN" = "1" ]; then
+  todo_status_details
+fi
 exit 1

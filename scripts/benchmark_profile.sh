@@ -121,6 +121,22 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
+metadata_file="${OUT_DIR}/run-metadata.txt"
+{
+  echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "host=${HOST}"
+  echo "port=${PORT}"
+  echo "requests=${REQUESTS}"
+  echo "repeats=${REPEATS}"
+  echo "mixes=${MIXES}"
+  echo "bench_timeout_seconds=${BENCH_TIMEOUT_SECONDS}"
+  echo "timeout_bin=${TIMEOUT_BIN:-disabled}"
+  echo "timeout_probe_exit=${TIMEOUT_PROBE_EXIT:-disabled}"
+  echo "resp3_flag=${RESP3_FLAG}"
+  echo "redis_benchmark=$(redis-benchmark --version 2>&1 | head -n 1)"
+  echo "redis_cli=$(redis-cli --version 2>&1 | head -n 1)"
+} >"${metadata_file}"
+
 ping_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" PING 2>&1 || true)"
 if [[ "${ping_output}" != "PONG" ]]; then
   echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
@@ -224,6 +240,7 @@ done
 
 cat <<EOF
 Saved profile results to ${OUT_DIR}
+Run metadata: ${metadata_file}
 Mixes: ${MIXES}
 Requests per run: ${REQUESTS}
 Repeats per mix/protocol/mode: ${REPEATS}

@@ -569,6 +569,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_inline_command_trims_leading_and_trailing_whitespace() {
+        let mut reader = Cursor::new(b"\t  PING   \t\r\n");
+        let frame = decode_frame(&mut reader).unwrap();
+        assert!(matches!(frame, Frame::Array(Some(elements)) if
+            matches!(elements.first(), Some(Frame::BulkString(Some(bytes))) if bytes == b"PING")
+                && elements.len() == 1
+        ));
+    }
+
+    #[test]
     fn reject_empty_inline_command() {
         let mut reader = Cursor::new(b"   \r\n");
         assert!(decode_frame(&mut reader).is_err());

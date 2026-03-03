@@ -69,6 +69,28 @@ run_case() {
   local proto_name="resp2"
   local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
 
+  run_or_report() {
+    local out_file="$1"
+    shift
+
+    if "$@" >"${out_file}"; then
+      return 0
+    fi
+
+    local status=$?
+    local quoted_cmd
+    quoted_cmd="$(printf '%q ' "$@")"
+
+    if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] && [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
+      echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
+    else
+      echo "Benchmark command failed with exit ${status}." >&2
+    fi
+    echo "Command: ${quoted_cmd}" >&2
+    echo "Output file: ${out_file}" >&2
+    return "${status}"
+  }
+
   if [[ "${protocol}" == "-3" ]]; then
     proto_name="resp3"
     cmd_base+=( -3 )
@@ -87,17 +109,17 @@ run_case() {
   fi
 
   if [[ "${mode}" == "basic" ]]; then
-    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" -t set,get,incr >"${out_file}"; then
+    if ! run_or_report "${out_file}" "${timeout_cmd[@]}" "${cmd_base[@]}" -t set,get,incr; then
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit 1
     fi
   elif [[ "${mode}" == "mget" ]]; then
-    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2 >"${out_file}"; then
+    if ! run_or_report "${out_file}" "${timeout_cmd[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2; then
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit 1
     fi
   else
-    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 >"${out_file}"; then
+    if ! run_or_report "${out_file}" "${timeout_cmd[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2; then
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit 1
     fi

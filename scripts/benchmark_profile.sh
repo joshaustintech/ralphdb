@@ -255,6 +255,7 @@ run_case() {
   fi
 
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
+  script_stage="benchmark:${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
 
   if [[ "${mode}" == "basic" ]]; then

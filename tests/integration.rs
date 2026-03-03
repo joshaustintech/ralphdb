@@ -718,6 +718,43 @@ fn resp3_scalar_arguments_allowed_after_hello() -> Result<()> {
 }
 
 #[test]
+fn resp3_scalar_arguments_rejected_after_hello2_downgrade() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"3")])?;
+    let hello3_frame = read_frame(&mut reader)?;
+    assert_hello3_map(hello3_frame);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"2")])?;
+    let hello2_frame = read_frame(&mut reader)?;
+    assert!(matches!(hello2_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    send_array(&mut writer, vec![bulk(b"PING"), Frame::Boolean(true)])?;
+    let ping_response = read_frame(&mut reader)?;
+    assert!(matches!(ping_response, Frame::Error(_)));
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
 fn info_command_covers_resp2_and_resp3() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let addr = listener.local_addr()?;

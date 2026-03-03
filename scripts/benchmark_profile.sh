@@ -19,6 +19,12 @@ MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
 BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+
+if ! [[ "${LABEL}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Label must contain only letters, numbers, dot, underscore, or dash (got: ${LABEL})." >&2
+  exit 1
+fi
+
 OUT_DIR="benchmark-results/${STAMP}-${LABEL}"
 
 if ! [[ "${REQUESTS}" =~ ^[1-9][0-9]*$ ]]; then

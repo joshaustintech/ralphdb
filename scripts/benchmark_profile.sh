@@ -94,6 +94,10 @@ run_case() {
     fi
     echo "Command: ${quoted_cmd}" >&2
     echo "Output file: ${out_file}" >&2
+    if [[ -s "${out_file}" ]]; then
+      echo "Last 20 output lines:" >&2
+      tail -n 20 "${out_file}" >&2
+    fi
     return "${status}"
   }
 

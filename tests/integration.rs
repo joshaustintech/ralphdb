@@ -496,6 +496,78 @@ fn incr_decr_resp3_flow() -> Result<()> {
 }
 
 #[test]
+fn incr_is_atomic_under_multi_client_contention() -> Result<()> {
+    const CLIENT_COUNT: usize = 4;
+    const INCREMENTS_PER_CLIENT: usize = 100;
+    const KEY: &[u8] = b"contended-counter";
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let mut connection_handles = Vec::with_capacity(CLIENT_COUNT + 1);
+        for _ in 0..(CLIENT_COUNT + 1) {
+            let (stream, _) = listener.accept()?;
+            let connection_storage = server_storage.clone();
+            connection_handles.push(thread::spawn(move || -> Result<()> {
+                Server::handle_connection(stream, connection_storage, None)
+            }));
+        }
+
+        for connection_handle in connection_handles {
+            connection_handle
+                .join()
+                .expect("connection thread panicked")?;
+        }
+        Ok(())
+    });
+
+    let mut client_handles = Vec::with_capacity(CLIENT_COUNT);
+    for _ in 0..CLIENT_COUNT {
+        client_handles.push(thread::spawn(move || -> Result<()> {
+            let stream = TcpStream::connect(addr)?;
+            let mut reader = BufReader::new(stream.try_clone()?);
+            let mut writer = BufWriter::new(stream);
+
+            for _ in 0..INCREMENTS_PER_CLIENT {
+                send_array(&mut writer, vec![bulk(b"INCR"), bulk(KEY)])?;
+                let response = read_frame(&mut reader)?;
+                assert!(matches!(response, Frame::Integer(_)));
+            }
+
+            send_array(&mut writer, vec![bulk(b"QUIT")])?;
+            let quit_response = read_frame(&mut reader)?;
+            assert!(matches!(quit_response, Frame::SimpleString(ref value) if value == "OK"));
+            Ok(())
+        }));
+    }
+
+    for client_handle in client_handles {
+        client_handle.join().expect("client thread panicked")?;
+    }
+
+    let expected = (CLIENT_COUNT * INCREMENTS_PER_CLIENT).to_string();
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"GET"), bulk(KEY)])?;
+    let get_response = read_frame(&mut reader)?;
+    assert!(
+        matches!(get_response, Frame::BulkString(Some(ref value)) if value == expected.as_bytes())
+    );
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
 fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let addr = listener.local_addr()?;

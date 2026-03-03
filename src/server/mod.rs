@@ -26,12 +26,12 @@ impl Config {
         let host = std::env::var("RALPHDB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
         let port = std::env::var("RALPHDB_PORT")
             .ok()
-            .and_then(|value| value.parse().ok())
+            .and_then(|value| value.trim().parse().ok())
             .unwrap_or(6379);
 
         let threads = std::env::var("RALPHDB_THREADS")
             .ok()
-            .and_then(|value| value.parse().ok())
+            .and_then(|value| value.trim().parse().ok())
             .unwrap_or_else(|| {
                 std::thread::available_parallelism()
                     .map(|n| n.get())
@@ -270,5 +270,19 @@ mod tests {
         let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some(" 15 "));
         let config = Config::from_env();
         assert_eq!(config.idle_timeout(), Some(Duration::from_secs(15)));
+    }
+
+    #[test]
+    fn port_trims_whitespace_wrapped_values() {
+        let _guard = EnvVarGuard::set("RALPHDB_PORT", Some(" 6380 "));
+        let config = Config::from_env();
+        assert!(config.address().ends_with(":6380"));
+    }
+
+    #[test]
+    fn threads_trims_whitespace_wrapped_values() {
+        let _guard = EnvVarGuard::set("RALPHDB_THREADS", Some(" 4 "));
+        let config = Config::from_env();
+        assert_eq!(config.threads, 4);
     }
 }

@@ -142,6 +142,7 @@ fi
 
 TIMEOUT_BIN=""
 TIMEOUT_PROBE_EXIT=""
+timeout_probe_status=0
 if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"

@@ -8,9 +8,15 @@ fi
 
 redis_benchmark_help="$(redis-benchmark --help 2>&1 || true)"
 if ! grep -Eq -- '(^|[[:space:]])-3([[:space:]]|$)|--resp3' <<<"${redis_benchmark_help}"; then
-  echo "redis-benchmark does not advertise RESP3 (-3) support." >&2
+  echo "redis-benchmark does not advertise RESP3 (-3/--resp3) support." >&2
   echo "Install Redis tools with RESP3 support, or use a newer redis-benchmark binary." >&2
   exit 1
+fi
+
+RESP3_FLAG="-3"
+if grep -Eq -- '(^|[[:space:]])--resp3([[:space:]]|$)' <<<"${redis_benchmark_help}" &&
+  ! grep -Eq -- '(^|[[:space:]])-3([[:space:]]|$)' <<<"${redis_benchmark_help}"; then
+  RESP3_FLAG="--resp3"
 fi
 
 if ! command -v redis-cli >/dev/null 2>&1; then
@@ -134,9 +140,9 @@ run_case() {
     return "${status}"
   }
 
-  if [[ "${protocol}" == "-3" ]]; then
+  if [[ "${protocol}" == "resp3" ]]; then
     proto_name="resp3"
-    cmd_base+=( -3 )
+    cmd_base+=( "${RESP3_FLAG}" )
   fi
 
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
@@ -176,9 +182,9 @@ for mix in "${mix_entries[@]}"; do
     run_case "" "basic" "${clients}" "${pipeline}" "${repeat}"
     run_case "" "mget" "${clients}" "${pipeline}" "${repeat}"
     run_case "" "mset" "${clients}" "${pipeline}" "${repeat}"
-    run_case "-3" "basic" "${clients}" "${pipeline}" "${repeat}"
-    run_case "-3" "mget" "${clients}" "${pipeline}" "${repeat}"
-    run_case "-3" "mset" "${clients}" "${pipeline}" "${repeat}"
+    run_case "resp3" "basic" "${clients}" "${pipeline}" "${repeat}"
+    run_case "resp3" "mget" "${clients}" "${pipeline}" "${repeat}"
+    run_case "resp3" "mset" "${clients}" "${pipeline}" "${repeat}"
   done
 done
 

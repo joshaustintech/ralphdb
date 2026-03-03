@@ -137,6 +137,16 @@ if [[ "${seed_output}" != "OK" ]]; then
   exit 1
 fi
 
+resp3_probe_cmd=("${TIMEOUT_CMD[@]}" redis-benchmark -h "${HOST}" -p "${PORT}" -n 1 -c 1 -P 1 "${RESP3_FLAG}" -t ping)
+if ! "${resp3_probe_cmd[@]}" >/dev/null 2>&1; then
+  resp3_probe_status=$?
+  quoted_resp3_probe_cmd="$(printf '%q ' "${resp3_probe_cmd[@]}")"
+  echo "RESP3 benchmark preflight failed with exit ${resp3_probe_status}." >&2
+  echo "Command: ${quoted_resp3_probe_cmd}" >&2
+  echo "Verify redis-benchmark RESP3 support and endpoint compatibility before rerunning the full profile." >&2
+  exit 1
+fi
+
 run_case() {
   local protocol="$1"
   local mode="$2"

@@ -57,7 +57,9 @@ if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   exit 1
 fi
 
-for mix in ${MIXES}; do
+read -r -a mix_entries <<<"${MIXES}"
+
+for mix in "${mix_entries[@]}"; do
   if ! [[ "${mix}" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
     echo "Invalid MIXES entry '${mix}'. Expected clients:pipeline with positive integers (example: 32:1)." >&2
     exit 1
@@ -160,7 +162,7 @@ run_case() {
   fi
 }
 
-for mix in ${MIXES}; do
+for mix in "${mix_entries[@]}"; do
   clients="${mix%%:*}"
   pipeline="${mix##*:}"
   for ((repeat = 1; repeat <= REPEATS; repeat++)); do

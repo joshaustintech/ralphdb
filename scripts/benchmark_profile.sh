@@ -261,6 +261,8 @@ last_non_empty_line() {
   local last=""
 
   while IFS= read -r line; do
+    # Normalize CRLF-terminated output so response checks are stable.
+    line="${line%$'\r'}"
     if [[ -n "${line//[[:space:]]/}" ]]; then
       last="${line}"
     fi

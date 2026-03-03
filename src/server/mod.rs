@@ -200,21 +200,38 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, time::Duration};
+    use std::{
+        env,
+        sync::{Mutex, MutexGuard, OnceLock},
+        time::Duration,
+    };
+
+    fn env_var_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     struct EnvVarGuard {
         key: &'static str,
         original: Option<String>,
+        _lock: MutexGuard<'static, ()>,
     }
 
     impl EnvVarGuard {
         fn set(key: &'static str, value: Option<&str>) -> Self {
+            let lock = env_var_test_lock()
+                .lock()
+                .expect("env var test lock should not be poisoned");
             let original = env::var(key).ok();
             match value {
                 Some(value) => unsafe { env::set_var(key, value) },
                 None => unsafe { env::remove_var(key) },
             }
-            Self { key, original }
+            Self {
+                key,
+                original,
+                _lock: lock,
+            }
         }
     }
 

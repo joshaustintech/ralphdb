@@ -3,6 +3,5 @@ WIGGUM_REMAINING_WORK=yes
 
 Are there important TODO items not yet captured? No.
 
-- Serialize tests that mutate `RALPHDB_IDLE_TIMEOUT_SECS` (unit + integration) with a global mutex or a serial helper to avoid env-var races.
 - Make `idle_timeout_env_closes_connection` resilient by polling for EOF/close until a deadline and tolerating `TimedOut` reads.
 - Stop setting `set_read_timeout` on the writer socket clone; keep read timeout on the reader and (optionally) keep write timeout on the writer.

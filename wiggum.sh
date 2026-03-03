@@ -11,6 +11,7 @@ MAX_ITERS="${MAX_ITERS:-}"
 TODO_FILE="${TODO_FILE:-TODO.md}"
 TODO_MARKER_KEY="${TODO_MARKER_KEY:-WIGGUM_REMAINING_WORK}"
 REQUIRE_TODO_GREEN="${REQUIRE_TODO_GREEN:-1}"
+AUTO_COMMIT_PUSH="${AUTO_COMMIT_PUSH:-1}"
 
 usage() {
   cat <<'EOF'
@@ -56,6 +57,49 @@ todo_status_details() {
   fi
   echo "TODO tail:"
   tail -n 40 "$TODO_FILE"
+}
+
+ensure_pushed() {
+  local branch
+  local ahead
+
+  branch="$(git branch --show-current)"
+  if [ -z "$branch" ]; then
+    echo "Unable to determine current git branch for push." >&2
+    return 1
+  fi
+
+  if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
+    ahead="$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo "0")"
+    if [ "$ahead" -gt 0 ]; then
+      echo "Pushing $ahead unpushed commit(s) to upstream..."
+      git push
+    fi
+    return 0
+  fi
+
+  echo "No upstream configured for '$branch'; pushing with -u."
+  git push -u origin "$branch"
+}
+
+sync_iteration_changes() {
+  local context="$1"
+
+  if [ "$AUTO_COMMIT_PUSH" != "1" ]; then
+    return 0
+  fi
+
+  if [ -n "$(git status --porcelain)" ]; then
+    git add -A
+    if git commit -m "Wiggum iteration ${iteration}: ${context}"; then
+      echo "Committed iteration changes."
+    else
+      echo "Failed to commit iteration changes." >&2
+      return 1
+    fi
+  fi
+
+  ensure_pushed
 }
 
 while [ "$#" -gt 0 ]; do
@@ -107,6 +151,9 @@ echo "Green condition: $GREEN_CMD"
 if [ "$REQUIRE_TODO_GREEN" = "1" ]; then
   echo "TODO gate: enabled (${TODO_FILE}, marker ${TODO_MARKER_KEY}=yes|no)"
 fi
+if [ "$AUTO_COMMIT_PUSH" = "1" ]; then
+  echo "Git sync: auto-commit + push enabled."
+fi
 
 iteration=1
 
@@ -117,6 +164,11 @@ while [ "$iteration" -le "$MAX_ITERS" ]; do
   green_log="$(mktemp)"
 
   if run_green_check >"$green_log" 2>&1; then
+    if ! sync_iteration_changes "green-checkpoint"; then
+      echo "Failed to sync repository before exiting green." >&2
+      rm -f "$green_log"
+      exit 1
+    fi
     echo "Green condition satisfied before iteration work. Stopping."
     rm -f "$green_log"
     exit 0
@@ -140,6 +192,7 @@ Goal:
 - Follow AGENTS.md exactly.
 - Keep scope small and verifiable.
 - Run formatting/tests/checks relevant to the change.
+- Do not run git commit/push yourself; the loop script handles commit/push each iteration.
 - Update $TODO_FILE at the end of your work:
   - Explicitly evaluate this question before finishing: "Are there important TODO items not yet captured?"
   - If yes, add the missing TODO items immediately.
@@ -162,12 +215,21 @@ EOF
   if ! codex exec -m "$MODEL" --config model_reasoning_effort="$EFFORT" --yolo "$prompt"; then
     echo "codex exec returned non-zero (continuing)."
   fi
+  if ! sync_iteration_changes "post-codex"; then
+    echo "Failed to sync repository changes for iteration $iteration." >&2
+    exit 1
+  fi
 
   iteration=$((iteration + 1))
   if [ "$iteration" -le "$MAX_ITERS" ]; then
     sleep "$SLEEP_SECS"
   fi
 done
+
+if ! sync_iteration_changes "post-loop"; then
+  echo "Failed to sync repository after loop completion." >&2
+  exit 1
+fi
 
 echo
 echo "Reached MAX_ITERS=$MAX_ITERS. Running final green check..."

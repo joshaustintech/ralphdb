@@ -223,6 +223,20 @@ last_run_started_label="none"
 last_run_completed_index=0
 last_run_completed_label="none"
 failure_context="none"
+sanitize_metadata_value() {
+  local value="$1"
+
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  value="${value//$'\t'/ }"
+  value="$(printf '%s' "${value}" | sed -e 's/[[:space:]]\+/ /g' -e 's/^ //; s/ $//')"
+  if [[ -z "${value}" ]]; then
+    value="none"
+  fi
+
+  printf '%s' "${value}"
+}
+
 finalize_metadata() {
   local exit_status=$?
   local completion_state="incomplete"
@@ -230,9 +244,17 @@ finalize_metadata() {
   local exit_kind="failure"
   local completion_timestamp
   local elapsed_seconds
+  local sanitized_script_stage
+  local sanitized_last_run_started_label
+  local sanitized_last_run_completed_label
+  local sanitized_failure_context
 
   completion_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   elapsed_seconds=$(( $(date +%s) - SCRIPT_START_EPOCH ))
+  sanitized_script_stage="$(sanitize_metadata_value "${script_stage}")"
+  sanitized_last_run_started_label="$(sanitize_metadata_value "${last_run_started_label}")"
+  sanitized_last_run_completed_label="$(sanitize_metadata_value "${last_run_completed_label}")"
+  sanitized_failure_context="$(sanitize_metadata_value "${failure_context}")"
 
   if ((COMPLETED_RUNS >= TOTAL_RUNS)); then
     completion_state="complete"
@@ -259,12 +281,12 @@ finalize_metadata() {
       echo "script_exit_status=${exit_status}"
       echo "completion_timestamp=${completion_timestamp}"
       echo "elapsed_seconds=${elapsed_seconds}"
-      echo "script_stage=${script_stage}"
+      echo "script_stage=${sanitized_script_stage}"
       echo "last_run_started_index=${last_run_started_index}"
-      echo "last_run_started_label=${last_run_started_label}"
+      echo "last_run_started_label=${sanitized_last_run_started_label}"
       echo "last_run_completed_index=${last_run_completed_index}"
-      echo "last_run_completed_label=${last_run_completed_label}"
-      echo "failure_context=${failure_context}"
+      echo "last_run_completed_label=${sanitized_last_run_completed_label}"
+      echo "failure_context=${sanitized_failure_context}"
     } >>"${metadata_file}"
     metadata_finalized=1
   fi

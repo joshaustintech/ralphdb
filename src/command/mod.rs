@@ -178,13 +178,15 @@ fn hello(args: &[Vec<u8>], state: &mut ConnectionState) -> CommandResult {
         return CommandResult::error("ERR wrong number of arguments for 'hello' command");
     }
 
-    let version = if let Some(version_value) = args.first() {
-        std::str::from_utf8(version_value)
+    let version = match args.first() {
+        Some(version_value) => match std::str::from_utf8(version_value)
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
-            .unwrap_or(2)
-    } else {
-        2
+        {
+            Some(version) => version,
+            None => return CommandResult::error("ERR unsupported RESP version"),
+        },
+        None => 2,
     };
 
     match version {
@@ -730,6 +732,38 @@ mod tests {
         assert!(matches!(
             result.response,
             Frame::Error(ref value) if value == "ERR wrong number of arguments for 'hello' command"
+        ));
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
+    }
+
+    #[test]
+    fn hello_rejects_nonnumeric_version() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![b"three".to_vec()],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+        assert!(matches!(
+            result.response,
+            Frame::Error(ref value) if value == "ERR unsupported RESP version"
+        ));
+        assert_eq!(state.protocol, ProtocolVersion::Resp2);
+    }
+
+    #[test]
+    fn hello_rejects_non_utf8_version() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let hello_cmd = Command {
+            name: "HELLO".into(),
+            args: vec![vec![0xff]],
+        };
+        let result = execute(&hello_cmd, &storage, &mut state);
+        assert!(matches!(
+            result.response,
+            Frame::Error(ref value) if value == "ERR unsupported RESP version"
         ));
         assert_eq!(state.protocol, ProtocolVersion::Resp2);
     }

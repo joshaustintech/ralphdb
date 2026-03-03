@@ -220,8 +220,10 @@ metadata_finalized=0
 script_stage="preflight:connectivity"
 last_run_started_index=0
 last_run_started_label="none"
+last_run_started_output_file="none"
 last_run_completed_index=0
 last_run_completed_label="none"
+last_run_completed_output_file="none"
 failure_context="none"
 sanitize_metadata_value() {
   local value="$1"
@@ -245,7 +247,9 @@ finalize_metadata() {
   local completion_timestamp
   local elapsed_seconds
   local sanitized_last_run_started_label
+  local sanitized_last_run_started_output_file
   local sanitized_last_run_completed_label
+  local sanitized_last_run_completed_output_file
   local sanitized_failure_context
   local sanitized_script_stage
 
@@ -271,7 +275,9 @@ finalize_metadata() {
     fi
     sanitized_script_stage="$(sanitize_metadata_value "${script_stage}")"
     sanitized_last_run_started_label="$(sanitize_metadata_value "${last_run_started_label}")"
+    sanitized_last_run_started_output_file="$(sanitize_metadata_value "${last_run_started_output_file}")"
     sanitized_last_run_completed_label="$(sanitize_metadata_value "${last_run_completed_label}")"
+    sanitized_last_run_completed_output_file="$(sanitize_metadata_value "${last_run_completed_output_file}")"
     sanitized_failure_context="$(sanitize_metadata_value "${failure_context}")"
     {
       echo "total_runs_completed=${COMPLETED_RUNS}"
@@ -284,8 +290,10 @@ finalize_metadata() {
       echo "script_stage=${sanitized_script_stage}"
       echo "last_run_started_index=${last_run_started_index}"
       echo "last_run_started_label=${sanitized_last_run_started_label}"
+      echo "last_run_started_output_file=${sanitized_last_run_started_output_file}"
       echo "last_run_completed_index=${last_run_completed_index}"
       echo "last_run_completed_label=${sanitized_last_run_completed_label}"
+      echo "last_run_completed_output_file=${sanitized_last_run_completed_output_file}"
       echo "failure_context=${sanitized_failure_context}"
     } >>"${metadata_file}"
     metadata_finalized=1
@@ -452,6 +460,7 @@ run_case() {
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
   last_run_started_index="${run_index}"
   last_run_started_label="${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
+  last_run_started_output_file="${out_file}"
   script_stage="benchmark:run${run_index}of${TOTAL_RUNS}:${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat} (run ${run_index}/${TOTAL_RUNS})"
 
@@ -490,6 +499,7 @@ run_case() {
   COMPLETED_RUNS=$((COMPLETED_RUNS + 1))
   last_run_completed_index="${run_index}"
   last_run_completed_label="${last_run_started_label}"
+  last_run_completed_output_file="${out_file}"
 }
 
 for mix in "${mix_entries[@]}"; do

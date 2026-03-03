@@ -128,7 +128,6 @@ impl Server {
 
         let writer_stream = stream;
         if let Some(timeout) = idle_timeout {
-            writer_stream.set_read_timeout(Some(timeout))?;
             writer_stream.set_write_timeout(Some(timeout))?;
         }
 

@@ -111,8 +111,9 @@ if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
     echo "${TIMEOUT_BIN} completed a timeout probe without timing out." >&2
     echo "Verify ${TIMEOUT_BIN} is functioning correctly or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
+  else
+    timeout_probe_status=$?
   fi
-  timeout_probe_status=$?
   if [[ "${timeout_probe_status}" -eq 125 || "${timeout_probe_status}" -eq 126 || "${timeout_probe_status}" -eq 127 ]]; then
     echo "${TIMEOUT_BIN} failed timeout probing with exit ${timeout_probe_status}." >&2
     echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2

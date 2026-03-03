@@ -25,11 +25,11 @@ if ! command -v redis-cli >/dev/null 2>&1; then
 fi
 
 HOST_RAW="${HOST:-127.0.0.1}"
-PORT="${PORT:-6379}"
-REQUESTS="${REQUESTS:-10000}"
-REPEATS="${REPEATS:-3}"
+PORT_RAW="${PORT:-6379}"
+REQUESTS_RAW="${REQUESTS:-10000}"
+REPEATS_RAW="${REPEATS:-3}"
 MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
-BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS:-120}"
+BENCH_TIMEOUT_SECONDS_RAW="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 SCRIPT_START_EPOCH="$(date +%s)"
@@ -38,6 +38,26 @@ SCRIPT_START_EPOCH="$(date +%s)"
 HOST="$(printf '%s' "${HOST_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${HOST}" ]]; then
   HOST="127.0.0.1"
+fi
+
+PORT="$(printf '%s' "${PORT_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [[ -z "${PORT}" ]]; then
+  PORT="6379"
+fi
+
+REQUESTS="$(printf '%s' "${REQUESTS_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [[ -z "${REQUESTS}" ]]; then
+  REQUESTS="10000"
+fi
+
+REPEATS="$(printf '%s' "${REPEATS_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [[ -z "${REPEATS}" ]]; then
+  REPEATS="3"
+fi
+
+BENCH_TIMEOUT_SECONDS="$(printf '%s' "${BENCH_TIMEOUT_SECONDS_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [[ -z "${BENCH_TIMEOUT_SECONDS}" ]]; then
+  BENCH_TIMEOUT_SECONDS="120"
 fi
 
 if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || ((PORT > 65535)); then

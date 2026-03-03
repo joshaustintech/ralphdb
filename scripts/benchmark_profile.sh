@@ -75,7 +75,11 @@ fi
 
 read -r -a mix_entries <<<"${MIXES}"
 MIX_COUNT="${#mix_entries[@]}"
-TOTAL_RUNS=$((MIX_COUNT * REPEATS * 6))
+MODES=("basic" "mget" "mset")
+PROTOCOLS=("resp2" "resp3")
+MODE_COUNT="${#MODES[@]}"
+PROTOCOL_COUNT="${#PROTOCOLS[@]}"
+TOTAL_RUNS=$((MIX_COUNT * REPEATS * MODE_COUNT * PROTOCOL_COUNT))
 COMPLETED_RUNS=0
 
 for mix in "${mix_entries[@]}"; do
@@ -135,6 +139,8 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
   echo "requests=${REQUESTS}"
   echo "repeats=${REPEATS}"
   echo "mixes=${MIXES}"
+  echo "mode_count=${MODE_COUNT}"
+  echo "protocol_count=${PROTOCOL_COUNT}"
   echo "bench_timeout_seconds=${BENCH_TIMEOUT_SECONDS}"
   echo "timeout_bin=${TIMEOUT_BIN:-disabled}"
   echo "timeout_probe_exit=${TIMEOUT_PROBE_EXIT:-disabled}"
@@ -277,7 +283,7 @@ run_case() {
   local pipeline="$4"
   local repeat="$5"
   local run_index=$((COMPLETED_RUNS + 1))
-  local proto_name="resp2"
+  local proto_name="${protocol}"
   local run_status
   local cmd_base=(redis-benchmark -h "${HOST}" -p "${PORT}" -n "${REQUESTS}" -c "${clients}" -P "${pipeline}")
 
@@ -309,7 +315,6 @@ run_case() {
   }
 
   if [[ "${protocol}" == "resp3" ]]; then
-    proto_name="resp3"
     cmd_base+=( "${RESP3_FLAG}" )
   fi
 
@@ -346,12 +351,11 @@ for mix in "${mix_entries[@]}"; do
   clients="${mix%%:*}"
   pipeline="${mix##*:}"
   for ((repeat = 1; repeat <= REPEATS; repeat++)); do
-    run_case "" "basic" "${clients}" "${pipeline}" "${repeat}"
-    run_case "" "mget" "${clients}" "${pipeline}" "${repeat}"
-    run_case "" "mset" "${clients}" "${pipeline}" "${repeat}"
-    run_case "resp3" "basic" "${clients}" "${pipeline}" "${repeat}"
-    run_case "resp3" "mget" "${clients}" "${pipeline}" "${repeat}"
-    run_case "resp3" "mset" "${clients}" "${pipeline}" "${repeat}"
+    for protocol in "${PROTOCOLS[@]}"; do
+      for mode in "${MODES[@]}"; do
+        run_case "${protocol}" "${mode}" "${clients}" "${pipeline}" "${repeat}"
+      done
+    done
   done
 done
 

@@ -26,7 +26,9 @@ impl Command {
             }
 
             let mut iter = elements.into_iter();
-            let command = iter.next().unwrap();
+            let command = iter
+                .next()
+                .ok_or_else(|| "ERR missing command".to_string())?;
             let name = match command {
                 Frame::SimpleString(s) => s,
                 Frame::BulkString(Some(bytes)) => String::from_utf8(bytes)
@@ -582,6 +584,15 @@ mod tests {
         let command = Command::try_from(frame).expect("should parse");
         assert_eq!(command.name, "SET");
         assert_eq!(command.args.len(), 2);
+    }
+
+    #[test]
+    fn reject_invalid_utf8_command_name() {
+        let frame = Frame::Array(Some(vec![Frame::BulkString(Some(vec![0x80]))]));
+        match Command::try_from(frame) {
+            Ok(_) => panic!("invalid command name should error"),
+            Err(error) => assert_eq!(error, "ERR invalid command name encoding"),
+        }
     }
 
     #[test]

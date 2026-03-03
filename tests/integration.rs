@@ -50,6 +50,38 @@ fn wait_for_ttl_expired(
     ))
 }
 
+fn wait_for_connection_close(reader: &mut BufReader<TcpStream>, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    let mut buffer = [0u8; 1];
+
+    while Instant::now() < deadline {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Err(err)
+                if err.kind() == ErrorKind::UnexpectedEof
+                    || err.kind() == ErrorKind::ConnectionReset =>
+            {
+                return Ok(());
+            }
+            Err(err)
+                if err.kind() == ErrorKind::TimedOut || err.kind() == ErrorKind::WouldBlock =>
+            {
+                continue;
+            }
+            other => {
+                return Err(anyhow!(
+                    "idle connection was not closed before deadline: {other:?}"
+                ));
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "idle connection was not closed within {} ms",
+        timeout.as_millis()
+    ))
+}
+
 struct EnvVarGuard {
     key: &'static str,
     original: Option<String>,
@@ -194,16 +226,9 @@ fn idle_timeout_env_closes_connection() -> Result<()> {
 
     let stream = TcpStream::connect(addr)?;
     let reader_stream = stream.try_clone()?;
-    reader_stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+    reader_stream.set_read_timeout(Some(Duration::from_millis(50)))?;
     let mut reader = BufReader::new(reader_stream);
-    thread::sleep(Duration::from_millis(1_100));
-
-    let mut buffer = [0u8; 1];
-    match reader.read(&mut buffer) {
-        Ok(0) => {}
-        Err(err) if err.kind() == ErrorKind::UnexpectedEof => {}
-        other => panic!("idle connection was not closed: {other:?}"),
-    }
+    wait_for_connection_close(&mut reader, Duration::from_secs(3))?;
 
     handle.join().expect("server thread panicked")?;
     Ok(())

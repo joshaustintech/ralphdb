@@ -6,6 +6,13 @@ if ! command -v redis-benchmark >/dev/null 2>&1; then
   exit 1
 fi
 
+redis_benchmark_help="$(redis-benchmark --help 2>&1 || true)"
+if ! grep -q -- " -3 " <<<"${redis_benchmark_help}"; then
+  echo "redis-benchmark does not advertise RESP3 (-3) support." >&2
+  echo "Install Redis tools with RESP3 support, or use a newer redis-benchmark binary." >&2
+  exit 1
+fi
+
 if ! command -v redis-cli >/dev/null 2>&1; then
   echo "redis-cli is required but not installed." >&2
   exit 1

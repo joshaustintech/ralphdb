@@ -2,11 +2,11 @@ use std::env;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use log::debug;
 use crate::{
     protocol::{Frame, ProtocolVersion},
     storage::{Storage, StorageError},
 };
+use log::debug;
 
 static CLIENT_ID_COUNTER: AtomicI64 = AtomicI64::new(1);
 
@@ -959,9 +959,11 @@ mod tests {
 
     #[test]
     fn client_list_resp3_uses_attributes_and_push() {
-        let mut state = ConnectionState::default();
-        state.protocol = ProtocolVersion::Resp3;
-        state.client_name = Some(b"ralph".to_vec());
+        let state = ConnectionState {
+            protocol: ProtocolVersion::Resp3,
+            client_name: Some(b"ralph".to_vec()),
+            ..ConnectionState::default()
+        };
         let client_id_value = state.client_id;
 
         let result = client_list(&[], &state);
@@ -1004,9 +1006,11 @@ mod tests {
 
     #[test]
     fn client_list_resp2_returns_summary_string() {
-        let mut state = ConnectionState::default();
-        state.protocol = ProtocolVersion::Resp2;
-        state.client_name = None;
+        let state = ConnectionState {
+            protocol: ProtocolVersion::Resp2,
+            client_name: None,
+            ..ConnectionState::default()
+        };
 
         let result = client_list(&[], &state);
         assert!(result.attributes.is_none());

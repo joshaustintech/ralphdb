@@ -37,10 +37,10 @@ fn wait_for_ttl_expired(
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         send_array(writer, vec![bulk(b"TTL"), bulk(key)])?;
-        if let Frame::Integer(value) = read_frame(reader)? {
-            if value == -2 {
-                return Ok(());
-            }
+        if let Frame::Integer(value) = read_frame(reader)?
+            && value == -2
+        {
+            return Ok(());
         }
         thread::sleep(Duration::from_millis(5));
     }
@@ -489,7 +489,7 @@ fn resp3_only_argument_types_rejected_before_hello() -> Result<()> {
 
     let unsupported_frames = vec![
         Frame::Boolean(true),
-        Frame::Double(3.14),
+        Frame::Double(std::f64::consts::PI),
         Frame::Map(Some(vec![(
             Frame::SimpleString("meta".into()),
             Frame::SimpleString("value".into()),
@@ -828,14 +828,14 @@ fn client_list_produces_attribute_push_integration() -> Result<()> {
             if let Frame::Map(Some(entries)) = &elements[0] {
                 let mut saw_name = false;
                 for (entry_key, entry_value) in entries {
-                    if let Frame::SimpleString(entry_key) = entry_key {
-                        if entry_key == "name" {
-                            assert!(matches!(
-                                entry_value,
-                                Frame::BulkString(Some(bytes)) if bytes == b"integration"
-                            ));
-                            saw_name = true;
-                        }
+                    if let Frame::SimpleString(entry_key) = entry_key
+                        && entry_key == "name"
+                    {
+                        assert!(matches!(
+                            entry_value,
+                            Frame::BulkString(Some(bytes)) if bytes == b"integration"
+                        ));
+                        saw_name = true;
                     }
                 }
                 assert!(saw_name);

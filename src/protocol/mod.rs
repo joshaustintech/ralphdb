@@ -865,22 +865,22 @@ mod tests {
 
     #[test]
     fn collection_length_validator_fuzzed_limits() {
-        let modulus = (MAX_COLLECTION_SIZE as i64) * 3 + 1;
+        let modulus = MAX_COLLECTION_SIZE * 3 + 1;
         let mut state = 0xdeadbeefu64;
         for _ in 0..512 {
             let candidate = (pseudo_random_u64(&mut state) % modulus as u64) as i64 - (modulus / 2);
-            let valid = candidate >= 0 && candidate <= MAX_COLLECTION_SIZE;
+            let valid = (0..=MAX_COLLECTION_SIZE).contains(&candidate);
             assert_eq!(ensure_collection_length(candidate).is_ok(), valid);
         }
     }
 
     #[test]
     fn bulk_length_validator_fuzzed_limits() {
-        let modulus = (MAX_BULK_SIZE as i64) * 3 + 1;
+        let modulus = MAX_BULK_SIZE * 3 + 1;
         let mut state = 0xfeedfaceu64;
         for _ in 0..512 {
             let candidate = (pseudo_random_u64(&mut state) % modulus as u64) as i64 - (modulus / 2);
-            let valid = candidate >= 0 && candidate <= MAX_BULK_SIZE;
+            let valid = (0..=MAX_BULK_SIZE).contains(&candidate);
             assert_eq!(ensure_bulk_length(candidate).is_ok(), valid);
         }
     }

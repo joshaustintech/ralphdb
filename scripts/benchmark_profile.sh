@@ -58,6 +58,12 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
+if ! redis-cli -h "${HOST}" -p "${PORT}" PING >/dev/null 2>&1; then
+  echo "Unable to reach Redis endpoint at ${HOST}:${PORT}." >&2
+  echo "Run the server first (for example: cargo run --release) or set HOST/PORT to a reachable endpoint." >&2
+  exit 1
+fi
+
 redis-cli -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 >/dev/null
 
 run_case() {

@@ -23,7 +23,11 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        let host = std::env::var("RALPHDB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+        let host = std::env::var("RALPHDB_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
         let port = std::env::var("RALPHDB_PORT")
             .ok()
             .and_then(|value| value.trim().parse().ok())
@@ -284,5 +288,19 @@ mod tests {
         let _guard = EnvVarGuard::set("RALPHDB_THREADS", Some(" 4 "));
         let config = Config::from_env();
         assert_eq!(config.threads, 4);
+    }
+
+    #[test]
+    fn host_trims_whitespace_wrapped_values() {
+        let _guard = EnvVarGuard::set("RALPHDB_HOST", Some(" 127.0.0.1 "));
+        let config = Config::from_env();
+        assert_eq!(config.host, "127.0.0.1");
+    }
+
+    #[test]
+    fn host_defaults_when_whitespace_only() {
+        let _guard = EnvVarGuard::set("RALPHDB_HOST", Some("   "));
+        let config = Config::from_env();
+        assert_eq!(config.host, "127.0.0.1");
     }
 }

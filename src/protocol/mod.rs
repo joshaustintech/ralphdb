@@ -52,7 +52,8 @@ fn read_line_bytes<R: BufRead>(reader: &mut R) -> io::Result<Vec<u8>> {
 
 fn read_line<R: BufRead>(reader: &mut R) -> io::Result<String> {
     let bytes = read_line_bytes(reader)?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    String::from_utf8(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8 in frame"))
 }
 
 fn parse_length(line: &str) -> io::Result<i64> {
@@ -526,6 +527,12 @@ mod tests {
         let mut reader = Cursor::new(b"+OK\r\n");
         let frame = decode_frame(&mut reader).unwrap();
         assert!(matches!(frame, Frame::SimpleString(ref value) if value == "OK"));
+    }
+
+    #[test]
+    fn reject_simple_string_with_invalid_utf8() {
+        let mut reader = Cursor::new(b"+\xFF\r\n");
+        assert!(decode_frame(&mut reader).is_err());
     }
 
     #[test]

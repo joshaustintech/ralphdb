@@ -152,25 +152,25 @@ run_case() {
 
     if "$@" >"${out_file}" 2>&1; then
       return 0
-    fi
-
-    local status=$?
-    local quoted_cmd
-    quoted_cmd="$(printf '%q ' "$@")"
-
-    if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
-      [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
-      echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
     else
-      echo "Benchmark command failed with exit ${status}." >&2
+      local status=$?
+      local quoted_cmd
+      quoted_cmd="$(printf '%q ' "$@")"
+
+      if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
+        [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+        echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
+      else
+        echo "Benchmark command failed with exit ${status}." >&2
+      fi
+      echo "Command: ${quoted_cmd}" >&2
+      echo "Output file: ${out_file}" >&2
+      if [[ -s "${out_file}" ]]; then
+        echo "Last 20 output lines:" >&2
+        tail -n 20 "${out_file}" >&2
+      fi
+      return "${status}"
     fi
-    echo "Command: ${quoted_cmd}" >&2
-    echo "Output file: ${out_file}" >&2
-    if [[ -s "${out_file}" ]]; then
-      echo "Last 20 output lines:" >&2
-      tail -n 20 "${out_file}" >&2
-    fi
-    return "${status}"
   }
 
   if [[ "${protocol}" == "resp3" ]]; then

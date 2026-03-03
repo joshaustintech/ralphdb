@@ -134,13 +134,13 @@ redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10
 Sample results from the runs above:
 
 - `redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 100 -c 1`  
-  SET: 10 000 requests per second (avg latency 0.095 ms, max 0.207 ms)  
-  GET: 12 500 requests per second (avg latency 0.072 ms, max 0.167 ms)
+  SET: 12,500 requests per second (avg latency 0.071 ms, max 0.119 ms)  
+  GET: 12,500 requests per second (avg latency 0.075 ms, max 0.119 ms)
 - `redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1 -P 10`  
-  SET: 66 666 requests per second (avg latency 0.110 ms, max 0.247 ms)  
-  GET: 66 666 requests per second (avg latency 0.094 ms, max 0.135 ms)
+  SET: 66,666.66 requests per second (avg latency 0.075 ms, max 0.119 ms)  
+  GET: 99,999.99 requests per second (avg latency 0.065 ms, max 0.087 ms)
 
-`redis-benchmark` still prints `WARNING: Could not fetch server CONFIG` while probing configuration information, but the benchmark itself succeeds and `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`).
+Validation note: `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) while benchmarking.
 
 ## Tests
 ```bash

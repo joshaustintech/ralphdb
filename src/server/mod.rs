@@ -65,52 +65,6 @@ impl Config {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{env, time::Duration};
-
-    struct EnvVarGuard {
-        key: &'static str,
-        original: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: Option<&str>) -> Self {
-            let original = env::var(key).ok();
-            match value {
-                Some(value) => unsafe { env::set_var(key, value) },
-                None => unsafe { env::remove_var(key) },
-            }
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            if let Some(value) = &self.original {
-                unsafe { env::set_var(self.key, value) };
-            } else {
-                unsafe { env::remove_var(self.key) };
-            }
-        }
-    }
-
-    #[test]
-    fn zero_idle_timeout_disables_timer() {
-        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some("0"));
-        let config = Config::from_env();
-        assert!(config.idle_timeout().is_none());
-    }
-
-    #[test]
-    fn default_idle_timeout_applied_when_missing() {
-        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", None);
-        let config = Config::from_env();
-        assert_eq!(config.idle_timeout(), Some(Duration::from_secs(300)));
-    }
-}
-
 pub struct Server {
     config: Config,
     storage: Arc<Storage>,
@@ -237,5 +191,51 @@ impl Server {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, time::Duration};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let original = env::var(key).ok();
+            match value {
+                Some(value) => unsafe { env::set_var(key, value) },
+                None => unsafe { env::remove_var(key) },
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.original {
+                unsafe { env::set_var(self.key, value) };
+            } else {
+                unsafe { env::remove_var(self.key) };
+            }
+        }
+    }
+
+    #[test]
+    fn zero_idle_timeout_disables_timer() {
+        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some("0"));
+        let config = Config::from_env();
+        assert!(config.idle_timeout().is_none());
+    }
+
+    #[test]
+    fn default_idle_timeout_applied_when_missing() {
+        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", None);
+        let config = Config::from_env();
+        assert_eq!(config.idle_timeout(), Some(Duration::from_secs(300)));
     }
 }

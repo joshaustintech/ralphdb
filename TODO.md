@@ -1,6 +1,6 @@
 # Next Steps
-WIGGUM_REMAINING_WORK=yes
-
 Are there important TODO items not yet captured? Yes.
 
-- [ ] Add a benchmark profile with multi-client concurrency (`-c` and pipelining mixes) and document stability/latency deltas in `README.md`.
+- [ ] Run `scripts/benchmark_profile.sh` for `baseline` and `candidate`, then publish the measured throughput/latency deltas in `README.md`.
+
+WIGGUM_REMAINING_WORK=yes

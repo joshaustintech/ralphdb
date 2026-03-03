@@ -174,6 +174,35 @@ Sample RESP3 results (captured on 2026-03-03):
 
 Validation note: `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) while benchmarking in both RESP2 and RESP3 workflows.
 
+### Multi-Client Profile Matrix
+Use the scripted profile to capture a consistent concurrency and pipelining mix across RESP2 and RESP3:
+
+```bash
+# Run against a local server (defaults: HOST=127.0.0.1, PORT=6379)
+scripts/benchmark_profile.sh baseline
+scripts/benchmark_profile.sh candidate
+```
+
+Default profile settings:
+- Mixes: `1:1`, `8:1`, `32:1`, `32:8` (`clients:pipeline`)
+- Commands: `SET/GET/INCR`, `MGET`, `MSET`
+- Protocols: RESP2 and RESP3
+- Repeats: 3
+- Requests per run: 10,000
+
+Tune with environment variables when needed:
+
+```bash
+REQUESTS=50000 REPEATS=5 MIXES="1:1 16:1 64:4" scripts/benchmark_profile.sh stress
+```
+
+Each run writes raw `redis-benchmark` output to `benchmark-results/<timestamp>-<label>/`.
+
+To document stability and latency deltas in a PR:
+1. Run a `baseline` profile on the reference revision.
+2. Run a `candidate` profile on your branch using the same machine/load conditions.
+3. Compare throughput and latency (`avg`, `p95`, `max`) for each matching file pair and report percentage deltas.
+
 ## Tests
 ```bash
 cargo test

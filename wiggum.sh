@@ -141,6 +141,8 @@ Goal:
 - Keep scope small and verifiable.
 - Run formatting/tests/checks relevant to the change.
 - Update $TODO_FILE at the end of your work:
+  - Explicitly evaluate this question before finishing: "Are there important TODO items not yet captured?"
+  - If yes, add the missing TODO items immediately.
   - Keep/insert exactly one marker line: ${TODO_MARKER_KEY}=yes or ${TODO_MARKER_KEY}=no
   - Set to "yes" if any meaningful work remains for this repository.
   - Set to "no" only when no meaningful next engineering tasks remain.

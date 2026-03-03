@@ -31,6 +31,55 @@ cargo run --release
 ./target/release/ralphdb
 ```
 
+## Wiggum Loop (Local)
+Use `wiggum.sh` to run an iterative Codex loop that stops only when the repo is truly green.
+
+```bash
+# Interactive max-iteration prompt
+./wiggum.sh
+
+# Explicit max iterations
+./wiggum.sh --max-iters 80
+```
+
+What the default green check enforces:
+- Build with warnings denied.
+- Test suite with warnings denied.
+- Clippy with warnings denied.
+- `TODO.md` marker reports no remaining work.
+
+Default settings:
+- `SLEEP_SECS=90` (can be overridden).
+- `REQUIRE_TODO_GREEN=1` (enabled).
+- `TODO_FILE=TODO.md`
+- `TODO_MARKER_KEY=WIGGUM_REMAINING_WORK`
+
+The TODO gate expects one marker line in `TODO.md`:
+```text
+WIGGUM_REMAINING_WORK=yes
+```
+or
+```text
+WIGGUM_REMAINING_WORK=no
+```
+
+Behavior:
+- `yes`: loop is not green, even if compile/test/clippy pass.
+- `no`: TODO gate passes.
+- If marker is missing, TODO gate fails.
+
+Useful overrides:
+```bash
+# Custom green condition command
+./wiggum.sh --max-iters 40 --green-cmd "cargo test --all-targets"
+
+# Disable TODO gating for a run
+REQUIRE_TODO_GREEN=0 ./wiggum.sh --max-iters 20
+
+# Use alternate todo file
+TODO_FILE=/tmp/TODO.md ./wiggum.sh --max-iters 10
+```
+
 ### Configuration
 Set these environment variables to override defaults:
 - `RALPHDB_HOST` (default: `127.0.0.1`)

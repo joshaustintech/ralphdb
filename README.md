@@ -150,7 +150,29 @@ Sample results from the runs above:
 - `redis-benchmark -h 127.0.0.1 -p 6379 -n 200 -c 1 MSET bench:k1 v1 bench:k2 v2`  
   MSET: 40,000.00 requests per second (avg latency 0.020 ms, p95 0.023 ms, max 0.119 ms)
 
-Validation note: `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) while benchmarking.
+RESP3 (`-3`) coverage for the same command set:
+
+```bash
+redis-benchmark -3 -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1
+redis-benchmark -3 -h 127.0.0.1 -p 6379 -t incr -n 200 -c 1
+redis-cli -p 6379 MSET bench:k1 v1 bench:k2 v2
+redis-benchmark -3 -h 127.0.0.1 -p 6379 -n 200 -c 1 MGET bench:k1 bench:k2
+redis-benchmark -3 -h 127.0.0.1 -p 6379 -n 200 -c 1 MSET bench:k1 v1 bench:k2 v2
+```
+
+Sample RESP3 results (captured on 2026-03-03):
+
+- `redis-benchmark -3 -h 127.0.0.1 -p 6379 -t set,get -n 200 -c 1`  
+  SET: 10,000.00 requests per second (avg latency 0.092 ms, p95 0.119 ms, max 0.127 ms)  
+  GET: 22,222.22 requests per second (avg latency 0.037 ms, p95 0.087 ms, max 0.103 ms)
+- `redis-benchmark -3 -h 127.0.0.1 -p 6379 -t incr -n 200 -c 1`  
+  INCR: 50,000.00 requests per second (avg latency 0.013 ms, p95 0.023 ms, max 0.151 ms)
+- `redis-benchmark -3 -h 127.0.0.1 -p 6379 -n 200 -c 1 MGET bench:k1 bench:k2`  
+  MGET: 28,571.43 requests per second (avg latency 0.030 ms, p95 0.055 ms, max 0.111 ms)
+- `redis-benchmark -3 -h 127.0.0.1 -p 6379 -n 200 -c 1 MSET bench:k1 v1 bench:k2 v2`  
+  MSET: 50,000.00 requests per second (avg latency 0.014 ms, p95 0.023 ms, max 0.175 ms)
+
+Validation note: `redis-cli -p 6379 CONFIG GET "server.*"` returns the documented entries (`server.name`, `server.version`, `server.bind`, `server.port`, `server.threads`) while benchmarking in both RESP2 and RESP3 workflows.
 
 ## Tests
 ```bash

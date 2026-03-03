@@ -146,6 +146,8 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
 
 metadata_finalized=0
 script_stage="preflight:connectivity"
+last_run_started_index=0
+last_run_started_label="none"
 finalize_metadata() {
   local exit_status=$?
   local completion_state="incomplete"
@@ -177,6 +179,8 @@ finalize_metadata() {
       echo "script_exit_kind=${exit_kind}"
       echo "script_exit_status=${exit_status}"
       echo "script_stage=${script_stage}"
+      echo "last_run_started_index=${last_run_started_index}"
+      echo "last_run_started_label=${last_run_started_label}"
     } >>"${metadata_file}"
     metadata_finalized=1
   fi
@@ -255,6 +259,8 @@ run_case() {
   fi
 
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
+  last_run_started_index=$((COMPLETED_RUNS + 1))
+  last_run_started_label="${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
   script_stage="benchmark:${proto_name}:${mode}:c${clients}:p${pipeline}:r${repeat}"
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
 

@@ -3,8 +3,9 @@ set -u -o pipefail
 
 MODEL="${MODEL:-gpt-5.3-codex}"
 EFFORT="${EFFORT:-medium}"
-SLEEP_SECS="${SLEEP_SECS:-1}"
-DEFAULT_GREEN_CMD='cargo test --quiet && cargo check --quiet'
+# Conservative default pacing for ChatGPT Pro Codex usage windows.
+SLEEP_SECS="${SLEEP_SECS:-90}"
+DEFAULT_GREEN_CMD="RUSTFLAGS='-D warnings' cargo build --all-targets --all-features && RUSTFLAGS='-D warnings' cargo test --all-targets --all-features && cargo clippy --all-targets --all-features -- -D warnings"
 GREEN_CMD="${GREEN_CMD:-$DEFAULT_GREEN_CMD}"
 MAX_ITERS="${MAX_ITERS:-}"
 
@@ -15,7 +16,7 @@ Usage: ./wiggum.sh [--max-iters N] [--green-cmd "command"] [--model NAME] [--eff
 Options:
   --max-iters N       Maximum loop iterations (required unless MAX_ITERS env var is set).
   --green-cmd CMD     Command that defines "green" status.
-                      Default: cargo test --quiet && cargo check --quiet
+                      Default: build + test + clippy with warnings denied.
   --model NAME        Codex model to use (default: gpt-5.3-codex).
   --effort LEVEL      model_reasoning_effort value (default: medium).
   -h, --help          Show this help.

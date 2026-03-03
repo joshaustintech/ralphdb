@@ -73,7 +73,7 @@ run_case() {
     local out_file="$1"
     shift
 
-    if "$@" >"${out_file}"; then
+    if "$@" >"${out_file}" 2>&1; then
       return 0
     fi
 

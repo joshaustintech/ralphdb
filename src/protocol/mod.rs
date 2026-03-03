@@ -512,7 +512,7 @@ pub fn encode_response<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{BufReader, Cursor, Read};
 
     fn pseudo_random_u64(state: &mut u64) -> u64 {
         *state = state
@@ -906,6 +906,64 @@ mod tests {
             let candidate = (pseudo_random_u64(&mut state) % modulus as u64) as i64 - (modulus / 2);
             let valid = (0..=MAX_BULK_SIZE).contains(&candidate);
             assert_eq!(ensure_bulk_length(candidate).is_ok(), valid);
+        }
+    }
+
+    fn assert_all_truncations_fail(frame_bytes: &[u8]) {
+        for cut in 0..frame_bytes.len() {
+            let mut reader = Cursor::new(&frame_bytes[..cut]);
+            assert!(
+                decode_frame(&mut reader).is_err(),
+                "truncated frame unexpectedly parsed at cut {cut}"
+            );
+        }
+    }
+
+    struct ChunkedReader {
+        data: Vec<u8>,
+        offset: usize,
+        max_chunk: usize,
+    }
+
+    impl Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.offset >= self.data.len() {
+                return Ok(0);
+            }
+            let remaining = self.data.len() - self.offset;
+            let chunk = remaining.min(self.max_chunk).min(buf.len());
+            buf[..chunk].copy_from_slice(&self.data[self.offset..self.offset + chunk]);
+            self.offset += chunk;
+            Ok(chunk)
+        }
+    }
+
+    #[test]
+    fn reject_truncated_frames_across_types() {
+        assert_all_truncations_fail(b"+OK\r\n");
+        assert_all_truncations_fail(b":42\r\n");
+        assert_all_truncations_fail(b"$3\r\nfoo\r\n");
+        assert_all_truncations_fail(b"*2\r\n+OK\r\n:1\r\n");
+        assert_all_truncations_fail(b"%1\r\n+k\r\n+v\r\n");
+        assert_all_truncations_fail(b"=7\r\ntxt:hi\r\n");
+    }
+
+    #[test]
+    fn parse_frame_with_chunked_transport_reads() {
+        let bytes = b"|1\r\n+meta\r\n+v\r\n*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n";
+        for max_chunk in 1..=7 {
+            let reader = ChunkedReader {
+                data: bytes.to_vec(),
+                offset: 0,
+                max_chunk,
+            };
+            let mut buffered = BufReader::new(reader);
+
+            let first = decode_frame(&mut buffered).unwrap();
+            assert!(matches!(first, Frame::Attribute(attributes) if attributes.len() == 1));
+
+            let second = decode_frame(&mut buffered).unwrap();
+            assert!(matches!(second, Frame::Array(Some(items)) if items.len() == 2));
         }
     }
 }

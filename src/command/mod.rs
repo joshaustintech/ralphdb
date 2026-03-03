@@ -334,15 +334,20 @@ fn expire(args: &[Vec<u8>], storage: &Storage) -> CommandResult {
         return CommandResult::error("ERR wrong number of arguments for 'expire'");
     }
 
-    let duration = match std::str::from_utf8(&args[1])
+    let seconds = match std::str::from_utf8(&args[1])
         .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|value| value.parse::<i64>().ok())
     {
-        Some(secs) => Duration::from_secs(secs),
+        Some(secs) => secs,
         None => return CommandResult::error("ERR value is not an integer or out of range"),
     };
 
-    if storage.expire(&args[0], duration) {
+    if seconds <= 0 {
+        let deleted = storage.del(&[args[0].clone()]);
+        return CommandResult::ok(Frame::Integer((deleted > 0) as i64));
+    }
+
+    if storage.expire(&args[0], Duration::from_secs(seconds as u64)) {
         CommandResult::ok(Frame::Integer(1))
     } else {
         CommandResult::ok(Frame::Integer(0))
@@ -807,6 +812,42 @@ mod tests {
         let expire_cmd = Command {
             name: "EXPIRE".into(),
             args: vec![b"temp".to_vec(), b"10".to_vec()],
+        };
+        let result = execute(&expire_cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Integer(0)));
+    }
+
+    #[test]
+    fn expire_non_positive_seconds_deletes_immediately() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        let mut state = ConnectionState::default();
+
+        let expire_zero = Command {
+            name: "EXPIRE".into(),
+            args: vec![b"temp".to_vec(), b"0".to_vec()],
+        };
+        let zero_result = execute(&expire_zero, &storage, &mut state);
+        assert!(matches!(zero_result.response, Frame::Integer(1)));
+        assert_eq!(storage.get(b"temp"), None);
+
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        let expire_negative = Command {
+            name: "EXPIRE".into(),
+            args: vec![b"temp".to_vec(), b"-5".to_vec()],
+        };
+        let negative_result = execute(&expire_negative, &storage, &mut state);
+        assert!(matches!(negative_result.response, Frame::Integer(1)));
+        assert_eq!(storage.get(b"temp"), None);
+    }
+
+    #[test]
+    fn expire_non_positive_seconds_missing_key_returns_zero() {
+        let storage = Storage::new();
+        let mut state = ConnectionState::default();
+        let expire_cmd = Command {
+            name: "EXPIRE".into(),
+            args: vec![b"missing".to_vec(), b"-1".to_vec()],
         };
         let result = execute(&expire_cmd, &storage, &mut state);
         assert!(matches!(result.response, Frame::Integer(0)));

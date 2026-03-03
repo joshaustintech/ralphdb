@@ -147,9 +147,29 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
 metadata_finalized=0
 finalize_metadata() {
   local exit_status=$?
+  local completion_state="incomplete"
+  local runs_remaining=$((TOTAL_RUNS - COMPLETED_RUNS))
+  local exit_kind="failure"
+
+  if ((COMPLETED_RUNS >= TOTAL_RUNS)); then
+    completion_state="complete"
+    runs_remaining=0
+  fi
+
+  if [[ "${exit_status}" -eq 0 ]]; then
+    exit_kind="success"
+  elif [[ "${exit_status}" -eq 124 ]]; then
+    exit_kind="timeout"
+  elif [[ "${exit_status}" -ge 128 ]]; then
+    exit_kind="signal"
+  fi
+
   if [[ "${metadata_finalized}" == "0" ]]; then
     {
       echo "total_runs_completed=${COMPLETED_RUNS}"
+      echo "total_runs_remaining=${runs_remaining}"
+      echo "run_completion_state=${completion_state}"
+      echo "script_exit_kind=${exit_kind}"
       echo "script_exit_status=${exit_status}"
     } >>"${metadata_file}"
     metadata_finalized=1

@@ -813,6 +813,22 @@ mod tests {
     }
 
     #[test]
+    fn del_on_unreaped_expired_key_returns_zero() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        assert!(storage.expire(b"temp", Duration::from_millis(5)));
+        sleep(Duration::from_millis(30));
+
+        let mut state = ConnectionState::default();
+        let del_cmd = Command {
+            name: "DEL".into(),
+            args: vec![b"temp".to_vec()],
+        };
+        let result = execute(&del_cmd, &storage, &mut state);
+        assert!(matches!(result.response, Frame::Integer(0)));
+    }
+
+    #[test]
     fn info_returns_server_metadata() {
         let storage = Storage::new();
         let mut state = ConnectionState::default();

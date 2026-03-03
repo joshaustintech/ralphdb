@@ -62,6 +62,14 @@ impl Storage {
     pub fn del(&self, keys: &[Vec<u8>]) -> usize {
         let mut count = 0;
         for key in keys {
+            if let Some(entry) = self.inner.get(key)
+                && entry.expired()
+            {
+                drop(entry);
+                self.inner.remove(key);
+                continue;
+            }
+
             if self.inner.remove(key).is_some() {
                 count += 1;
             }
@@ -198,6 +206,16 @@ mod tests {
         wait_for_removal(&storage, b"temp");
         assert!(!storage.expire(b"temp", Duration::from_secs(1)));
         assert_eq!(storage.get(b"temp"), None);
+    }
+
+    #[test]
+    fn del_on_expired_key_returns_zero() {
+        let storage = Storage::new();
+        storage.set(b"temp".to_vec(), b"value".to_vec());
+        assert!(storage.expire(b"temp", Duration::from_millis(5)));
+        sleep(Duration::from_millis(30));
+
+        assert_eq!(storage.del(&[b"temp".to_vec()]), 0);
     }
 
     #[test]

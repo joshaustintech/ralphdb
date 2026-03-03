@@ -65,6 +65,8 @@ if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+BENCH_TIMEOUT_SECONDS_NUM=$((10#${BENCH_TIMEOUT_SECONDS}))
+
 if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   echo "MIXES must include at least one clients:pipeline entry (for example: 1:1 8:1)." >&2
   exit 1
@@ -82,7 +84,7 @@ for mix in "${mix_entries[@]}"; do
   fi
 done
 
-if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
+if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
   ! command -v timeout >/dev/null 2>&1 &&
   ! command -v gtimeout >/dev/null 2>&1; then
   echo "BENCH_TIMEOUT_SECONDS is set but neither timeout nor gtimeout is installed." >&2
@@ -93,7 +95,7 @@ fi
 TIMEOUT_BIN=""
 TIMEOUT_CMD=()
 TIMEOUT_PROBE_EXIT=""
-if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
+if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
   else
@@ -119,7 +121,7 @@ if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
   fi
   TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
 
-  TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}")
+  TIMEOUT_CMD=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}")
 fi
 
 mkdir -p "${OUT_DIR}"
@@ -201,9 +203,9 @@ run_case() {
       local quoted_cmd
       quoted_cmd="$(printf '%q ' "$@")"
 
-      if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]] &&
+      if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
         [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
-        echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
+        echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
       else
         echo "Benchmark command failed with exit ${status}." >&2
       fi

@@ -257,4 +257,11 @@ mod tests {
         let config = Config::from_env();
         assert_eq!(config.idle_timeout(), Some(Duration::from_secs(300)));
     }
+
+    #[test]
+    fn default_idle_timeout_applied_for_invalid_values() {
+        let _guard = EnvVarGuard::set("RALPHDB_IDLE_TIMEOUT_SECS", Some("-1"));
+        let config = Config::from_env();
+        assert_eq!(config.idle_timeout(), Some(Duration::from_secs(300)));
+    }
 }

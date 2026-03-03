@@ -195,7 +195,40 @@ finalize_metadata() {
 }
 trap finalize_metadata EXIT
 
-ping_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" PING 2>&1 || true)"
+run_cli_preflight_or_report() {
+  local preflight_name="$1"
+  shift
+  local status
+  local output
+  local quoted_cmd
+  local cmd=("${TIMEOUT_CMD[@]}" redis-cli --raw -h "${HOST}" -p "${PORT}" "$@")
+
+  if output="$("${cmd[@]}" 2>&1)"; then
+    printf '%s' "${output}"
+    return 0
+  fi
+
+  status=$?
+  quoted_cmd="$(printf '%q ' "${cmd[@]}")"
+  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
+    [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+    echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
+  else
+    echo "Preflight '${preflight_name}' failed with exit ${status}." >&2
+  fi
+  echo "Command: ${quoted_cmd}" >&2
+  if [[ -n "${output}" ]]; then
+    echo "Output: ${output}" >&2
+  fi
+  return "${status}"
+}
+
+script_stage="preflight:connectivity"
+ping_status=0
+ping_output="$(run_cli_preflight_or_report "connectivity" PING)" || ping_status=$?
+if ((ping_status != 0)); then
+  exit "${ping_status}"
+fi
 if [[ "${ping_output}" != "PONG" ]]; then
   echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
   echo "Expected response: PONG; received: ${ping_output}" >&2
@@ -204,7 +237,11 @@ if [[ "${ping_output}" != "PONG" ]]; then
 fi
 
 script_stage="preflight:seed"
-seed_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 2>&1 || true)"
+seed_status=0
+seed_output="$(run_cli_preflight_or_report "seed" MSET bench:k1 v1 bench:k2 v2)" || seed_status=$?
+if ((seed_status != 0)); then
+  exit "${seed_status}"
+fi
 if [[ "${seed_output}" != "OK" ]]; then
   echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
   echo "Expected response: OK; received: ${seed_output}" >&2

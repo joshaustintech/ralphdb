@@ -141,11 +141,14 @@ impl Server {
             let frame = match protocol::decode_frame(&mut reader) {
                 Ok(frame) => frame,
                 Err(err)
-                    if err.kind() == io::ErrorKind::UnexpectedEof
-                        || err.kind() == io::ErrorKind::WouldBlock
+                    if err.kind() == io::ErrorKind::WouldBlock
                         || err.kind() == io::ErrorKind::TimedOut =>
                 {
                     log::info!("Closing idle connection for {peer}");
+                    break;
+                }
+                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                    log::debug!("Client disconnected: {peer}");
                     break;
                 }
                 Err(err) => {

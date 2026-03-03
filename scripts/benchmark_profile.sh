@@ -65,10 +65,16 @@ if [[ -z "${LABEL}" ]]; then
   LABEL="manual"
 fi
 
-if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || ((PORT > 65535)); then
+if ! [[ "${PORT}" =~ ^[1-9][0-9]{0,4}$ ]]; then
   echo "PORT must be an integer between 1 and 65535 (got: ${PORT})." >&2
   exit 1
 fi
+PORT_NUM=$((10#${PORT}))
+if ((PORT_NUM > 65535)); then
+  echo "PORT must be an integer between 1 and 65535 (got: ${PORT})." >&2
+  exit 1
+fi
+PORT="${PORT_NUM}"
 
 if ! [[ "${LABEL}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Label must contain only letters, numbers, dot, underscore, or dash (got: ${LABEL})." >&2
@@ -81,11 +87,13 @@ if ! [[ "${REQUESTS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "REQUESTS must be a positive integer (got: ${REQUESTS})." >&2
   exit 1
 fi
+REQUESTS="$((10#${REQUESTS}))"
 
 if ! [[ "${REPEATS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "REPEATS must be a positive integer (got: ${REPEATS})." >&2
   exit 1
 fi
+REPEATS="$((10#${REPEATS}))"
 
 if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
   echo "BENCH_TIMEOUT_SECONDS must be a non-negative integer (got: ${BENCH_TIMEOUT_SECONDS})." >&2
@@ -93,6 +101,7 @@ if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
 fi
 
 BENCH_TIMEOUT_SECONDS_NUM=$((10#${BENCH_TIMEOUT_SECONDS}))
+BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS_NUM}"
 
 if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   echo "MIXES must include at least one clients:pipeline entry (for example: 1:1 8:1)." >&2

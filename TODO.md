@@ -1,7 +1,8 @@
 # Next Steps
 Are there important TODO items not yet captured? Yes.
-Evaluation: Yes. While publishing baseline/candidate deltas, the default high-concurrency profile (`MIXES` including `32:1`) did not complete and needs follow-up.
+Evaluation: Yes. Added per-run benchmark timeout handling in `scripts/benchmark_profile.sh`, but the default profile still needs a full rerun and published baseline/candidate deltas.
 
-- [ ] Investigate and fix why `scripts/benchmark_profile.sh` can stall on the default high-concurrency mix (`32:1`), then rerun/publish full default-profile baseline vs candidate deltas.
+- [ ] Rerun `scripts/benchmark_profile.sh` with the default `MIXES` (including `32:1`) and verify timeout-protected runs complete or fail fast with actionable errors.
+- [ ] Publish updated full default-profile baseline vs candidate benchmark deltas after the rerun.
 
 WIGGUM_REMAINING_WORK=yes

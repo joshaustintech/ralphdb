@@ -16,6 +16,7 @@ PORT="${PORT:-6379}"
 REQUESTS="${REQUESTS:-10000}"
 REPEATS="${REPEATS:-3}"
 MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
+BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="benchmark-results/${STAMP}-${LABEL}"
@@ -41,12 +42,32 @@ run_case() {
   local out_file="${OUT_DIR}/${proto_name}-${mode}-c${clients}-p${pipeline}-r${repeat}.txt"
   echo "Running ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}"
 
+  local timeout_cmd=()
+  if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout_cmd=(timeout "${BENCH_TIMEOUT_SECONDS}")
+    elif command -v gtimeout >/dev/null 2>&1; then
+      timeout_cmd=(gtimeout "${BENCH_TIMEOUT_SECONDS}")
+    else
+      echo "Warning: timeout disabled because neither timeout nor gtimeout is installed." >&2
+    fi
+  fi
+
   if [[ "${mode}" == "basic" ]]; then
-    "${cmd_base[@]}" -t set,get,incr >"${out_file}"
+    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" -t set,get,incr >"${out_file}"; then
+      echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
+      exit 1
+    fi
   elif [[ "${mode}" == "mget" ]]; then
-    "${cmd_base[@]}" MGET bench:k1 bench:k2 >"${out_file}"
+    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" MGET bench:k1 bench:k2 >"${out_file}"; then
+      echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
+      exit 1
+    fi
   else
-    "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 >"${out_file}"
+    if ! "${timeout_cmd[@]}" "${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2 >"${out_file}"; then
+      echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
+      exit 1
+    fi
   fi
 }
 

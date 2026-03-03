@@ -222,6 +222,7 @@ last_run_started_index=0
 last_run_started_label="none"
 last_run_completed_index=0
 last_run_completed_label="none"
+failure_context="none"
 finalize_metadata() {
   local exit_status=$?
   local completion_state="incomplete"
@@ -263,6 +264,7 @@ finalize_metadata() {
       echo "last_run_started_label=${last_run_started_label}"
       echo "last_run_completed_index=${last_run_completed_index}"
       echo "last_run_completed_label=${last_run_completed_label}"
+      echo "failure_context=${failure_context}"
     } >>"${metadata_file}"
     metadata_finalized=1
   fi
@@ -291,8 +293,10 @@ run_cli_preflight_or_report() {
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"
   if is_timeout_status "${status}"; then
     echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
+    failure_context="preflight:${preflight_name}:timeout:${status}"
   else
     echo "Preflight '${preflight_name}' failed with exit ${status}." >&2
+    failure_context="preflight:${preflight_name}:failure:${status}"
   fi
   echo "Command: ${quoted_cmd}" >&2
   if [[ -n "${output}" ]]; then
@@ -325,6 +329,7 @@ if ((ping_status != 0)); then
 fi
 ping_response="$(last_non_empty_line "${ping_output}")"
 if [[ "${ping_response}" != "PONG" ]]; then
+  failure_context="preflight:connectivity:unexpected-response:${ping_response}"
   echo "Unable to validate Redis endpoint at ${HOST}:${PORT} with PING." >&2
   echo "Expected response: PONG; last response line: ${ping_response}" >&2
   if [[ "${ping_output}" != "${ping_response}" ]]; then
@@ -342,6 +347,7 @@ if ((seed_status != 0)); then
 fi
 seed_response="$(last_non_empty_line "${seed_output}")"
 if [[ "${seed_response}" != "OK" ]]; then
+  failure_context="preflight:seed:unexpected-response:${seed_response}"
   echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
   echo "Expected response: OK; last response line: ${seed_response}" >&2
   if [[ "${seed_output}" != "${seed_response}" ]]; then
@@ -363,8 +369,10 @@ if ((resp3_probe_status != 0)); then
   quoted_resp3_probe_cmd="$(printf '%q ' "${resp3_probe_cmd[@]}")"
   if is_timeout_status "${resp3_probe_status}"; then
     echo "RESP3 benchmark preflight timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${resp3_probe_status})." >&2
+    failure_context="preflight:resp3_probe:timeout:${resp3_probe_status}"
   else
     echo "RESP3 benchmark preflight failed with exit ${resp3_probe_status}." >&2
+    failure_context="preflight:resp3_probe:failure:${resp3_probe_status}"
   fi
   echo "Command: ${quoted_resp3_probe_cmd}" >&2
   if [[ -n "${resp3_probe_output}" ]]; then
@@ -400,8 +408,10 @@ run_case() {
 
       if is_timeout_status "${status}"; then
         echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
+        failure_context="benchmark:${last_run_started_label}:timeout:${status}:${out_file}"
       else
         echo "Benchmark command failed with exit ${status}." >&2
+        failure_context="benchmark:${last_run_started_label}:failure:${status}:${out_file}"
       fi
       echo "Command: ${quoted_cmd}" >&2
       echo "Output file: ${out_file}" >&2

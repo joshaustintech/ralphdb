@@ -145,6 +145,7 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
 } >"${metadata_file}"
 
 metadata_finalized=0
+script_stage="preflight:connectivity"
 finalize_metadata() {
   local exit_status=$?
   local completion_state="incomplete"
@@ -166,12 +167,16 @@ finalize_metadata() {
   fi
 
   if [[ "${metadata_finalized}" == "0" ]]; then
+    if [[ "${exit_status}" -eq 0 ]]; then
+      script_stage="complete"
+    fi
     {
       echo "total_runs_completed=${COMPLETED_RUNS}"
       echo "total_runs_remaining=${runs_remaining}"
       echo "run_completion_state=${completion_state}"
       echo "script_exit_kind=${exit_kind}"
       echo "script_exit_status=${exit_status}"
+      echo "script_stage=${script_stage}"
     } >>"${metadata_file}"
     metadata_finalized=1
   fi
@@ -186,6 +191,7 @@ if [[ "${ping_output}" != "PONG" ]]; then
   exit 1
 fi
 
+script_stage="preflight:seed"
 seed_output="$(redis-cli --raw -h "${HOST}" -p "${PORT}" MSET bench:k1 v1 bench:k2 v2 2>&1 || true)"
 if [[ "${seed_output}" != "OK" ]]; then
   echo "Failed to seed benchmark keys via redis-cli at ${HOST}:${PORT}." >&2
@@ -194,6 +200,7 @@ if [[ "${seed_output}" != "OK" ]]; then
   exit 1
 fi
 
+script_stage="preflight:resp3_probe"
 resp3_probe_cmd=("${TIMEOUT_CMD[@]}" redis-benchmark -h "${HOST}" -p "${PORT}" -n 1 -c 1 -P 1 "${RESP3_FLAG}" -t ping)
 if ! "${resp3_probe_cmd[@]}" >/dev/null 2>&1; then
   resp3_probe_status=$?
@@ -204,6 +211,7 @@ if ! "${resp3_probe_cmd[@]}" >/dev/null 2>&1; then
   exit "${resp3_probe_status}"
 fi
 
+script_stage="benchmark:runs"
 run_case() {
   local protocol="$1"
   local mode="$2"

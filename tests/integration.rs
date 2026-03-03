@@ -273,6 +273,41 @@ fn null_semantics_follow_protocol() -> Result<()> {
 }
 
 #[test]
+fn hello_invalid_version_rejected_and_keeps_resp2_semantics() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        let (stream, _) = listener.accept()?;
+        Server::handle_connection(stream, server_storage, None)?;
+        Ok(())
+    });
+
+    let stream = TcpStream::connect(addr)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut writer = BufWriter::new(stream);
+
+    send_array(&mut writer, vec![bulk(b"HELLO"), bulk(b"NaN")])?;
+    let hello_response = read_frame(&mut reader)?;
+    assert!(
+        matches!(hello_response, Frame::Error(ref message) if message == "ERR unsupported RESP version")
+    );
+
+    send_array(&mut writer, vec![bulk(b"GET"), bulk(b"missing")])?;
+    let get_response = read_frame(&mut reader)?;
+    assert!(matches!(get_response, Frame::BulkString(None)));
+
+    send_array(&mut writer, vec![bulk(b"QUIT")])?;
+    let quit_frame = read_frame(&mut reader)?;
+    assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
+
+    handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
 fn expire_and_ttl_resp2_flow() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let addr = listener.local_addr()?;

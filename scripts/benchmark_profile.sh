@@ -29,6 +29,7 @@ PORT_RAW="${PORT:-6379}"
 REQUESTS_RAW="${REQUESTS:-10000}"
 REPEATS_RAW="${REPEATS:-3}"
 MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
+MODES_RAW="${MODES:-basic mget mset}"
 BENCH_TIMEOUT_SECONDS_RAW="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL_RAW="${1:-manual}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -125,9 +126,27 @@ if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   exit 1
 fi
 
+if [[ -z "${MODES_RAW//[[:space:]]/}" ]]; then
+  echo "MODES must include at least one benchmark mode (supported: basic mget mset)." >&2
+  exit 1
+fi
+
 read -r -a mix_entries <<<"${MIXES}"
+read -r -a mode_entries <<<"${MODES_RAW}"
 MIX_COUNT="${#mix_entries[@]}"
-MODES=("basic" "mget" "mset")
+SUPPORTED_MODES=("basic" "mget" "mset")
+MODES=()
+for mode in "${mode_entries[@]}"; do
+  case "${mode}" in
+  basic | mget | mset)
+    MODES+=("${mode}")
+    ;;
+  *)
+    echo "Invalid MODES entry '${mode}'. Supported modes: ${SUPPORTED_MODES[*]}." >&2
+    exit 1
+    ;;
+  esac
+done
 PROTOCOLS=("resp2" "resp3")
 MODE_COUNT="${#MODES[@]}"
 PROTOCOL_COUNT="${#PROTOCOLS[@]}"
@@ -542,7 +561,7 @@ run_case() {
     }
   else
     failure_context="benchmark:${last_run_started_label}:invalid-mode:${mode}"
-    echo "Unsupported benchmark mode '${mode}'." >&2
+    echo "Unsupported benchmark mode '${mode}'. Supported modes: ${SUPPORTED_MODES[*]}." >&2
     exit 1
   fi
 

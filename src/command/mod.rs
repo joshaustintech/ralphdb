@@ -538,12 +538,21 @@ fn config_entries() -> Vec<(String, String)> {
 fn default_threads() -> usize {
     env::var("RALPHDB_THREADS")
         .ok()
-        .and_then(|value| value.parse().ok())
+        .as_deref()
+        .and_then(parse_threads_env_value)
         .unwrap_or_else(|| {
             std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1)
         })
+}
+
+fn parse_threads_env_value(value: &str) -> Option<usize> {
+    value
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|threads| *threads > 0)
 }
 
 fn matches_pattern(pattern: &str, key: &str) -> bool {
@@ -1103,6 +1112,18 @@ mod tests {
         } else {
             panic!("CONFIG GET server.* should return an array");
         }
+    }
+
+    #[test]
+    fn parse_threads_env_value_trims_whitespace() {
+        assert_eq!(parse_threads_env_value(" 4 "), Some(4));
+    }
+
+    #[test]
+    fn parse_threads_env_value_rejects_zero_and_invalid_values() {
+        assert_eq!(parse_threads_env_value("0"), None);
+        assert_eq!(parse_threads_env_value("  "), None);
+        assert_eq!(parse_threads_env_value("abc"), None);
     }
 
     #[test]

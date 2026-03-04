@@ -409,12 +409,13 @@ run_cli_preflight_or_report() {
   fi
 
   if output="$("${cmd[@]}" 2>&1)"; then
-    printf '%s' "${output}"
+    RUN_CLI_PREFLIGHT_OUTPUT="${output}"
     return 0
   else
     status=$?
   fi
 
+  RUN_CLI_PREFLIGHT_OUTPUT="${output}"
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"
   if is_timeout_status "${status}"; then
     echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
@@ -447,11 +448,13 @@ last_non_empty_line() {
 }
 
 script_stage="preflight:connectivity"
-ping_status=0
-ping_output="$(run_cli_preflight_or_report "connectivity" PING)" || ping_status=$?
-if ((ping_status != 0)); then
+if run_cli_preflight_or_report "connectivity" PING; then
+  :
+else
+  ping_status=$?
   exit "${ping_status}"
 fi
+ping_output="${RUN_CLI_PREFLIGHT_OUTPUT}"
 ping_response="$(last_non_empty_line "${ping_output}")"
 if [[ "${ping_response}" != "PONG" ]]; then
   failure_context="preflight:connectivity:unexpected-response:${ping_response}"
@@ -465,11 +468,13 @@ if [[ "${ping_response}" != "PONG" ]]; then
 fi
 
 script_stage="preflight:seed"
-seed_status=0
-seed_output="$(run_cli_preflight_or_report "seed" MSET bench:k1 v1 bench:k2 v2)" || seed_status=$?
-if ((seed_status != 0)); then
+if run_cli_preflight_or_report "seed" MSET bench:k1 v1 bench:k2 v2; then
+  :
+else
+  seed_status=$?
   exit "${seed_status}"
 fi
+seed_output="${RUN_CLI_PREFLIGHT_OUTPUT}"
 seed_response="$(last_non_empty_line "${seed_output}")"
 if [[ "${seed_response}" != "OK" ]]; then
   failure_context="preflight:seed:unexpected-response:${seed_response}"

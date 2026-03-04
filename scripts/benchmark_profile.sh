@@ -178,7 +178,9 @@ is_timeout_status() {
     return 0
   fi
 
-  if [[ -n "${TIMEOUT_PROBE_EXIT}" && "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
+  if [[ -n "${TIMEOUT_PROBE_EXIT}" &&
+    "${TIMEOUT_PROBE_EXIT}" =~ ^[0-9]+$ &&
+    "${status}" -eq "${TIMEOUT_PROBE_EXIT}" ]]; then
     return 0
   fi
 

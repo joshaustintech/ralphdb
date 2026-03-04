@@ -246,6 +246,7 @@ finalize_metadata() {
   local exit_kind="failure"
   local completion_timestamp
   local elapsed_seconds
+  local timeout_probe_exit_final
   local sanitized_last_run_started_label
   local sanitized_last_run_started_output_file
   local sanitized_last_run_completed_label
@@ -273,6 +274,11 @@ finalize_metadata() {
     if [[ "${exit_status}" -eq 0 ]]; then
       script_stage="complete"
     fi
+    if ((BENCH_TIMEOUT_ENABLED)); then
+      timeout_probe_exit_final="${TIMEOUT_PROBE_EXIT:-pending}"
+    else
+      timeout_probe_exit_final="disabled"
+    fi
     sanitized_script_stage="$(sanitize_metadata_value "${script_stage}")"
     sanitized_last_run_started_label="$(sanitize_metadata_value "${last_run_started_label}")"
     sanitized_last_run_started_output_file="$(sanitize_metadata_value "${last_run_started_output_file}")"
@@ -288,7 +294,7 @@ finalize_metadata() {
       echo "completion_timestamp=${completion_timestamp}"
       echo "elapsed_seconds=${elapsed_seconds}"
       echo "script_stage=${sanitized_script_stage}"
-      echo "timeout_probe_exit_final=${TIMEOUT_PROBE_EXIT:-disabled}"
+      echo "timeout_probe_exit_final=${timeout_probe_exit_final}"
       echo "last_run_started_index=${last_run_started_index}"
       echo "last_run_started_label=${sanitized_last_run_started_label}"
       echo "last_run_started_output_file=${sanitized_last_run_started_output_file}"

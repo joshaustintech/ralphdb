@@ -547,20 +547,48 @@ fn default_threads() -> usize {
 }
 
 fn matches_pattern(pattern: &str, key: &str) -> bool {
-    if pattern == "*" {
-        true
-    } else if pattern.is_empty() {
-        false
-    } else if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 1 {
-        let inner = &pattern[1..pattern.len() - 1];
-        key.contains(inner)
-    } else if let Some(suffix) = pattern.strip_prefix('*') {
-        key.ends_with(suffix)
-    } else if let Some(prefix) = pattern.strip_suffix('*') {
-        key.starts_with(prefix)
-    } else {
-        key == pattern
+    if pattern.is_empty() {
+        return false;
     }
+
+    let pattern_bytes = pattern.as_bytes();
+    let key_bytes = key.as_bytes();
+    let mut pattern_index = 0usize;
+    let mut key_index = 0usize;
+    let mut star_index: Option<usize> = None;
+    let mut star_match_index = 0usize;
+
+    while key_index < key_bytes.len() {
+        if pattern_index < pattern_bytes.len()
+            && pattern_bytes[pattern_index] == key_bytes[key_index]
+        {
+            pattern_index += 1;
+            key_index += 1;
+            continue;
+        }
+
+        if pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_match_index = key_index;
+            continue;
+        }
+
+        if let Some(star) = star_index {
+            pattern_index = star + 1;
+            star_match_index += 1;
+            key_index = star_match_index;
+            continue;
+        }
+
+        return false;
+    }
+
+    while pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern_bytes.len()
 }
 
 #[cfg(test)]
@@ -1166,6 +1194,24 @@ mod tests {
     fn matches_pattern_inner_wildcard() {
         assert!(matches_pattern("*inner*", "begin_inner_end"));
         assert!(!matches_pattern("*inner*", "prefixpost"));
+    }
+
+    #[test]
+    fn matches_pattern_middle_wildcard() {
+        assert!(matches_pattern("serv*port", "server.port"));
+        assert!(!matches_pattern("serv*port", "server.bind"));
+    }
+
+    #[test]
+    fn matches_pattern_multiple_wildcards() {
+        assert!(matches_pattern("s*r.*ion", "server.version"));
+        assert!(!matches_pattern("s*r.*ion", "server.port"));
+    }
+
+    #[test]
+    fn matches_pattern_consecutive_wildcards() {
+        assert!(matches_pattern("server**", "server.port"));
+        assert!(matches_pattern("**threads", "server.threads"));
     }
 
     #[test]

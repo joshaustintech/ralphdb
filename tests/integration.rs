@@ -5,6 +5,10 @@ use std::{
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -1428,6 +1432,131 @@ fn benchmark_profile_records_preflight_failure_context() -> Result<()> {
             .get("failure_context")
             .is_some_and(|value| value.starts_with("preflight:connectivity:")),
         "failure_context should identify a connectivity preflight failure"
+    );
+
+    fs::remove_dir_all(profile_dir)?;
+    Ok(())
+}
+
+#[test]
+fn benchmark_profile_records_completion_metadata_for_single_mix_run() -> Result<()> {
+    if !command_exists("redis-cli") || !command_exists("redis-benchmark") {
+        eprintln!(
+            "skipping benchmark metadata integration test because redis-cli/redis-benchmark are unavailable"
+        );
+        return Ok(());
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    listener.set_nonblocking(true)?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_signal = Arc::clone(&stop);
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        while !stop_signal.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if let Err(error) =
+                        Server::handle_connection(stream, server_storage.clone(), None)
+                    {
+                        if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+                            match io_error.kind() {
+                                ErrorKind::ConnectionReset
+                                | ErrorKind::BrokenPipe
+                                | ErrorKind::UnexpectedEof => {}
+                                _ => return Err(error),
+                            }
+                        } else {
+                            return Err(error);
+                        }
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    });
+
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let label = format!("metadata-complete-{nanos}");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/benchmark_profile.sh");
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .arg(&label)
+        .current_dir(&repo_root)
+        .env("HOST", addr.ip().to_string())
+        .env("PORT", addr.port().to_string())
+        .env("REQUESTS", "1")
+        .env("REPEATS", "1")
+        .env("MIXES", "1:1")
+        .env("MODES", "basic")
+        .env("BENCH_TIMEOUT_SECONDS", "0")
+        .status()?;
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("server thread panicked")?;
+
+    assert!(
+        status.success(),
+        "benchmark profile should complete successfully for a reachable endpoint"
+    );
+
+    let profile_dir = find_profile_dir_for_label(&label)?;
+    let metadata_path = profile_dir.join("run-metadata.txt");
+    let metadata_contents = fs::read_to_string(&metadata_path)?;
+    let metadata = parse_metadata(&metadata_contents);
+
+    assert_eq!(
+        metadata.get("total_runs_expected").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("total_runs_completed").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("total_runs_remaining").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        metadata.get("run_completion_state").map(String::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        metadata.get("script_exit_kind").map(String::as_str),
+        Some("success")
+    );
+    assert_eq!(
+        metadata.get("script_stage").map(String::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        metadata.get("last_run_started_index").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_index").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("last_run_started_label").map(String::as_str),
+        Some("resp3:basic:c1:p1:r1")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_label").map(String::as_str),
+        Some("resp3:basic:c1:p1:r1")
+    );
+    assert_eq!(
+        metadata.get("failure_context").map(String::as_str),
+        Some("none")
     );
 
     fs::remove_dir_all(profile_dir)?;

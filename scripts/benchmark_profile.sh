@@ -28,7 +28,7 @@ HOST_RAW="${HOST:-127.0.0.1}"
 PORT_RAW="${PORT:-6379}"
 REQUESTS_RAW="${REQUESTS:-10000}"
 REPEATS_RAW="${REPEATS:-3}"
-MIXES="${MIXES:-1:1 8:1 32:1 32:8}"
+MIXES_RAW="${MIXES:-1:1 8:1 32:1 32:8}"
 MODES_RAW="${MODES:-basic mget mset}"
 BENCH_TIMEOUT_SECONDS_RAW="${BENCH_TIMEOUT_SECONDS:-120}"
 LABEL_RAW="${1:-manual}"
@@ -121,18 +121,21 @@ if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
   BENCH_TIMEOUT_ENABLED=1
 fi
 
+MIXES="$(printf '%s' "${MIXES_RAW}" | tr ',' ' ')"
+MODES_INPUT="$(printf '%s' "${MODES_RAW}" | tr ',' ' ')"
+
 if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   echo "MIXES must include at least one clients:pipeline entry (for example: 1:1 8:1)." >&2
   exit 1
 fi
 
-if [[ -z "${MODES_RAW//[[:space:]]/}" ]]; then
+if [[ -z "${MODES_INPUT//[[:space:]]/}" ]]; then
   echo "MODES must include at least one benchmark mode (supported: basic mget mset)." >&2
   exit 1
 fi
 
 read -r -a mix_entries <<<"${MIXES}"
-read -r -a mode_entries <<<"${MODES_RAW}"
+read -r -a mode_entries <<<"${MODES_INPUT}"
 MIX_COUNT="${#mix_entries[@]}"
 SUPPORTED_MODES=("basic" "mget" "mset")
 MODES=()

@@ -60,6 +60,16 @@ if [[ -z "${BENCH_TIMEOUT_SECONDS}" ]]; then
   BENCH_TIMEOUT_SECONDS="120"
 fi
 
+normalize_nonnegative_integer() {
+  local value="$1"
+  value="${value#"${value%%[!0]*}"}"
+  if [[ -z "${value}" ]]; then
+    value="0"
+  fi
+
+  printf '%s' "${value}"
+}
+
 LABEL="$(printf '%s' "${LABEL_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${LABEL}" ]]; then
   LABEL="manual"
@@ -100,8 +110,11 @@ if ! [[ "${BENCH_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-BENCH_TIMEOUT_SECONDS_NUM=$((10#${BENCH_TIMEOUT_SECONDS}))
-BENCH_TIMEOUT_SECONDS="${BENCH_TIMEOUT_SECONDS_NUM}"
+BENCH_TIMEOUT_SECONDS="$(normalize_nonnegative_integer "${BENCH_TIMEOUT_SECONDS}")"
+BENCH_TIMEOUT_ENABLED=0
+if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
+  BENCH_TIMEOUT_ENABLED=1
+fi
 
 if [[ -z "${MIXES//[[:space:]]/}" ]]; then
   echo "MIXES must include at least one clients:pipeline entry (for example: 1:1 8:1)." >&2
@@ -132,7 +145,7 @@ done
 MIXES="${normalized_mix_entries[*]}"
 mix_entries=("${normalized_mix_entries[@]}")
 
-if ((BENCH_TIMEOUT_SECONDS_NUM > 0)) &&
+if ((BENCH_TIMEOUT_ENABLED)) &&
   ! command -v timeout >/dev/null 2>&1 &&
   ! command -v gtimeout >/dev/null 2>&1; then
   echo "BENCH_TIMEOUT_SECONDS is set but neither timeout nor gtimeout is installed." >&2
@@ -142,7 +155,7 @@ fi
 
 TIMEOUT_BIN=""
 TIMEOUT_PROBE_EXIT=""
-if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+if ((BENCH_TIMEOUT_ENABLED)); then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
   else
@@ -153,7 +166,7 @@ fi
 is_timeout_status() {
   local status="$1"
 
-  if ((BENCH_TIMEOUT_SECONDS_NUM <= 0)); then
+  if ((!BENCH_TIMEOUT_ENABLED)); then
     return 1
   fi
 
@@ -187,7 +200,7 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
   echo "protocol_count=${PROTOCOL_COUNT}"
   echo "bench_timeout_seconds=${BENCH_TIMEOUT_SECONDS}"
   echo "timeout_bin=${TIMEOUT_BIN:-disabled}"
-  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+  if ((BENCH_TIMEOUT_ENABLED)); then
     echo "timeout_probe_exit=pending"
   else
     echo "timeout_probe_exit=disabled"
@@ -287,7 +300,7 @@ trap finalize_metadata EXIT
 
 timeout_probe_status=0
 timeout_probe_output=""
-if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+if ((BENCH_TIMEOUT_ENABLED)); then
   script_stage="preflight:timeout_probe"
   timeout_probe_output="$("${TIMEOUT_BIN}" 1 sh -c "sleep 2" 2>&1)" || timeout_probe_status=$?
   if [[ "${timeout_probe_status}" -eq 0 ]]; then
@@ -326,8 +339,8 @@ run_cli_preflight_or_report() {
   local quoted_cmd
   local cmd=(redis-cli --raw -h "${HOST}" -p "${PORT}" "$@")
 
-  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
-    cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${cmd[@]}")
+  if ((BENCH_TIMEOUT_ENABLED)); then
+    cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${cmd[@]}")
   fi
 
   if output="$("${cmd[@]}" 2>&1)"; then
@@ -339,7 +352,7 @@ run_cli_preflight_or_report() {
 
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"
   if is_timeout_status "${status}"; then
-    echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
+    echo "Preflight '${preflight_name}' timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
     failure_context="preflight:${preflight_name}:timeout:${status}"
   else
     echo "Preflight '${preflight_name}' failed with exit ${status}." >&2
@@ -406,8 +419,8 @@ fi
 
 script_stage="preflight:resp3_probe"
 resp3_probe_cmd=(redis-benchmark -h "${HOST}" -p "${PORT}" -n 1 -c 1 -P 1 "${RESP3_FLAG}" -t ping)
-if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
-  resp3_probe_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${resp3_probe_cmd[@]}")
+if ((BENCH_TIMEOUT_ENABLED)); then
+  resp3_probe_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${resp3_probe_cmd[@]}")
 fi
 resp3_probe_output=""
 resp3_probe_status=0
@@ -415,7 +428,7 @@ resp3_probe_output="$("${resp3_probe_cmd[@]}" 2>&1)" || resp3_probe_status=$?
 if ((resp3_probe_status != 0)); then
   quoted_resp3_probe_cmd="$(printf '%q ' "${resp3_probe_cmd[@]}")"
   if is_timeout_status "${resp3_probe_status}"; then
-    echo "RESP3 benchmark preflight timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${resp3_probe_status})." >&2
+    echo "RESP3 benchmark preflight timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${resp3_probe_status})." >&2
     failure_context="preflight:resp3_probe:timeout:${resp3_probe_status}"
   else
     echo "RESP3 benchmark preflight failed with exit ${resp3_probe_status}." >&2
@@ -454,7 +467,7 @@ run_case() {
       quoted_cmd="$(printf '%q ' "$@")"
 
       if is_timeout_status "${status}"; then
-        echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS_NUM}s (exit ${status})." >&2
+        echo "Benchmark timed out after ${BENCH_TIMEOUT_SECONDS}s (exit ${status})." >&2
         failure_context="benchmark:${last_run_started_label}:timeout:${status}:${out_file}"
       else
         echo "Benchmark command failed with exit ${status}." >&2
@@ -483,8 +496,8 @@ run_case() {
 
   if [[ "${mode}" == "basic" ]]; then
     run_cmd=("${cmd_base[@]}" -t set,get,incr)
-    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
-      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    if ((BENCH_TIMEOUT_ENABLED)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${run_cmd[@]}")
     fi
     run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?
@@ -493,8 +506,8 @@ run_case() {
     }
   elif [[ "${mode}" == "mget" ]]; then
     run_cmd=("${cmd_base[@]}" MGET bench:k1 bench:k2)
-    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
-      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    if ((BENCH_TIMEOUT_ENABLED)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${run_cmd[@]}")
     fi
     run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?
@@ -503,8 +516,8 @@ run_case() {
     }
   else
     run_cmd=("${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2)
-    if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
-      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS_NUM}" "${run_cmd[@]}")
+    if ((BENCH_TIMEOUT_ENABLED)); then
+      run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${run_cmd[@]}")
     fi
     run_or_report "${out_file}" "${run_cmd[@]}" || {
       run_status=$?

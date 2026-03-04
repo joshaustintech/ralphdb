@@ -1,9 +1,12 @@
 use std::{
-    env,
+    collections::HashMap,
+    env, fs,
     io::{BufReader, BufWriter, ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
+    path::PathBuf,
+    process::Command,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Result, anyhow};
@@ -156,6 +159,45 @@ fn assert_hello3_map(frame: Frame) {
     } else {
         panic!("HELLO 3 should respond with a map");
     }
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {name} >/dev/null 2>&1"))
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn parse_metadata(contents: &str) -> HashMap<String, String> {
+    contents
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
+fn find_profile_dir_for_label(label: &str) -> Result<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmark-results");
+    let mut candidates = vec![];
+
+    for entry in fs::read_dir(&root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|name| name.to_str())
+            && name.ends_with(&format!("-{label}"))
+        {
+            candidates.push(path);
+        }
+    }
+
+    candidates.sort_unstable();
+    candidates
+        .pop()
+        .ok_or_else(|| anyhow!("no benchmark-results directory found for label {label}"))
 }
 
 #[test]
@@ -1324,5 +1366,70 @@ fn config_get_star_available() -> Result<()> {
     assert!(matches!(quit_frame, Frame::SimpleString(ref value) if value == "OK"));
 
     handle.join().expect("server thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn benchmark_profile_records_preflight_failure_context() -> Result<()> {
+    if !command_exists("redis-cli") || !command_exists("redis-benchmark") {
+        eprintln!(
+            "skipping benchmark metadata integration test because redis-cli/redis-benchmark are unavailable"
+        );
+        return Ok(());
+    }
+
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let label = format!("metadata-preflight-{nanos}");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/benchmark_profile.sh");
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .arg(&label)
+        .current_dir(&repo_root)
+        .env("HOST", "127.0.0.1")
+        .env("PORT", "1")
+        .env("REQUESTS", "1")
+        .env("REPEATS", "1")
+        .env("MIXES", "1:1")
+        .env("MODES", "basic")
+        .env("BENCH_TIMEOUT_SECONDS", "0")
+        .status()?;
+
+    assert!(
+        !status.success(),
+        "benchmark profile should fail preflight connectivity when target endpoint is unreachable"
+    );
+
+    let profile_dir = find_profile_dir_for_label(&label)?;
+    let metadata_path = profile_dir.join("run-metadata.txt");
+    let metadata_contents = fs::read_to_string(&metadata_path)?;
+    let metadata = parse_metadata(&metadata_contents);
+
+    assert_eq!(
+        metadata.get("script_stage").map(String::as_str),
+        Some("preflight:connectivity")
+    );
+    assert_eq!(
+        metadata.get("script_exit_kind").map(String::as_str),
+        Some("failure")
+    );
+    assert_eq!(
+        metadata.get("run_completion_state").map(String::as_str),
+        Some("incomplete")
+    );
+    assert_ne!(
+        metadata.get("failure_context").map(String::as_str),
+        Some("none"),
+        "failure_context should preserve preflight failure details"
+    );
+    assert!(
+        metadata
+            .get("failure_context")
+            .is_some_and(|value| value.starts_with("preflight:connectivity:")),
+        "failure_context should identify a connectivity preflight failure"
+    );
+
+    fs::remove_dir_all(profile_dir)?;
     Ok(())
 }

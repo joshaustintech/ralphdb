@@ -39,6 +39,10 @@ HOST="$(printf '%s' "${HOST_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]
 if [[ -z "${HOST}" ]]; then
   HOST="127.0.0.1"
 fi
+if [[ "${HOST}" =~ [[:space:]] ]]; then
+  echo "HOST must not contain whitespace (got: ${HOST})." >&2
+  exit 1
+fi
 
 PORT="$(printf '%s' "${PORT_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${PORT}" ]]; then

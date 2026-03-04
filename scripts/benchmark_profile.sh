@@ -160,6 +160,7 @@ TOTAL_RUNS=$((MIX_COUNT * REPEATS * MODE_COUNT * PROTOCOL_COUNT))
 COMPLETED_RUNS=0
 
 normalized_mix_entries=()
+seen_mixes=" "
 for mix in "${mix_entries[@]}"; do
   if ! [[ "${mix}" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
     echo "Invalid MIXES entry '${mix}'. Expected clients:pipeline with positive integers (example: 32:1)." >&2
@@ -169,7 +170,13 @@ for mix in "${mix_entries[@]}"; do
   mix_pipeline="${mix##*:}"
   mix_clients="$((10#${mix_clients}))"
   mix_pipeline="$((10#${mix_pipeline}))"
-  normalized_mix_entries+=("${mix_clients}:${mix_pipeline}")
+  normalized_mix="${mix_clients}:${mix_pipeline}"
+  if [[ "${seen_mixes}" == *" ${normalized_mix} "* ]]; then
+    echo "Duplicate MIXES entry '${mix}' (normalized as '${normalized_mix}'). Each clients:pipeline mix may be listed only once." >&2
+    exit 1
+  fi
+  normalized_mix_entries+=("${normalized_mix}")
+  seen_mixes+="${normalized_mix} "
 done
 MIXES="${normalized_mix_entries[*]}"
 mix_entries=("${normalized_mix_entries[@]}")

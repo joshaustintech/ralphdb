@@ -520,8 +520,16 @@ fn config(args: &[Vec<u8>]) -> CommandResult {
 }
 
 fn config_entries() -> Vec<(String, String)> {
-    let host = env::var("RALPHDB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = env::var("RALPHDB_PORT").unwrap_or_else(|_| "6379".into());
+    let host = env::var("RALPHDB_HOST")
+        .ok()
+        .as_deref()
+        .and_then(parse_host_env_value)
+        .unwrap_or_else(|| "127.0.0.1".into());
+    let port = env::var("RALPHDB_PORT")
+        .ok()
+        .as_deref()
+        .and_then(parse_port_env_value)
+        .unwrap_or_else(|| "6379".into());
     let threads = default_threads();
 
     vec![
@@ -553,6 +561,23 @@ fn parse_threads_env_value(value: &str) -> Option<usize> {
         .parse::<usize>()
         .ok()
         .filter(|threads| *threads > 0)
+}
+
+fn parse_host_env_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn parse_port_env_value(value: &str) -> Option<String> {
+    value
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .map(|port| port.to_string())
 }
 
 fn matches_pattern(pattern: &str, key: &str) -> bool {
@@ -1124,6 +1149,31 @@ mod tests {
         assert_eq!(parse_threads_env_value("0"), None);
         assert_eq!(parse_threads_env_value("  "), None);
         assert_eq!(parse_threads_env_value("abc"), None);
+    }
+
+    #[test]
+    fn parse_host_env_value_trims_whitespace() {
+        assert_eq!(
+            parse_host_env_value(" 127.0.0.1 "),
+            Some("127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_host_env_value_rejects_empty_values() {
+        assert_eq!(parse_host_env_value("   "), None);
+    }
+
+    #[test]
+    fn parse_port_env_value_trims_and_normalizes_numbers() {
+        assert_eq!(parse_port_env_value(" 06379 "), Some("6379".to_string()));
+    }
+
+    #[test]
+    fn parse_port_env_value_rejects_invalid_numbers() {
+        assert_eq!(parse_port_env_value("0"), Some("0".to_string()));
+        assert_eq!(parse_port_env_value("65536"), None);
+        assert_eq!(parse_port_env_value("port"), None);
     }
 
     #[test]

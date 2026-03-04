@@ -136,10 +136,16 @@ read -r -a mode_entries <<<"${MODES_RAW}"
 MIX_COUNT="${#mix_entries[@]}"
 SUPPORTED_MODES=("basic" "mget" "mset")
 MODES=()
+seen_modes=" "
 for mode in "${mode_entries[@]}"; do
   case "${mode}" in
   basic | mget | mset)
+    if [[ "${seen_modes}" == *" ${mode} "* ]]; then
+      echo "Duplicate MODES entry '${mode}'. Each mode may be listed only once." >&2
+      exit 1
+    fi
     MODES+=("${mode}")
+    seen_modes+="${mode} "
     ;;
   *)
     echo "Invalid MODES entry '${mode}'. Supported modes: ${SUPPORTED_MODES[*]}." >&2

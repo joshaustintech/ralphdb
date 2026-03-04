@@ -313,6 +313,7 @@ timeout_probe_output=""
 if ((BENCH_TIMEOUT_ENABLED)); then
   script_stage="preflight:timeout_probe"
   timeout_probe_output="$("${TIMEOUT_BIN}" 1 sh -c "sleep 2" 2>&1)" || timeout_probe_status=$?
+  TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
   if [[ "${timeout_probe_status}" -eq 0 ]]; then
     failure_context="preflight:timeout_probe:unexpected-success"
     echo "${TIMEOUT_BIN} completed a timeout probe without timing out." >&2
@@ -338,7 +339,6 @@ if ((BENCH_TIMEOUT_ENABLED)); then
     echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
     exit 1
   fi
-  TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
 fi
 
 run_cli_preflight_or_report() {

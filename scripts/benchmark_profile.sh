@@ -75,6 +75,18 @@ normalize_nonnegative_integer() {
   printf '%s' "${value}"
 }
 
+reject_empty_comma_entries() {
+  local raw_value="$1"
+  local var_name="$2"
+
+  if [[ "${raw_value}" == *","* ]] &&
+    [[ "${raw_value}" =~ (^|,)[[:space:]]*(,|$) ]]; then
+    echo "${var_name} contains an empty comma-separated entry (got: ${raw_value})." >&2
+    echo "Remove leading, trailing, or repeated commas." >&2
+    exit 1
+  fi
+}
+
 LABEL="$(printf '%s' "${LABEL_RAW}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 if [[ -z "${LABEL}" ]]; then
   LABEL="manual"
@@ -121,6 +133,8 @@ if [[ "${BENCH_TIMEOUT_SECONDS}" != "0" ]]; then
   BENCH_TIMEOUT_ENABLED=1
 fi
 
+reject_empty_comma_entries "${MIXES_RAW}" "MIXES"
+reject_empty_comma_entries "${MODES_RAW}" "MODES"
 MIXES="$(printf '%s' "${MIXES_RAW}" | tr ',' ' ')"
 MODES_INPUT="$(printf '%s' "${MODES_RAW}" | tr ',' ' ')"
 

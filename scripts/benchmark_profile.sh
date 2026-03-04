@@ -174,6 +174,10 @@ is_timeout_status() {
     return 1
   fi
 
+  if ! [[ "${status}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
   if [[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq 143 ]]; then
     return 0
   fi

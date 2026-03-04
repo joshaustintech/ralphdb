@@ -1422,6 +1422,40 @@ fn benchmark_profile_records_preflight_failure_context() -> Result<()> {
         metadata.get("run_completion_state").map(String::as_str),
         Some("incomplete")
     );
+    assert!(
+        metadata
+            .get("script_exit_status")
+            .is_some_and(|value| value != "0"),
+        "script_exit_status should be non-zero for preflight failures"
+    );
+    assert_eq!(
+        metadata.get("last_run_started_index").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        metadata.get("last_run_started_label").map(String::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        metadata
+            .get("last_run_started_output_file")
+            .map(String::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_index").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_label").map(String::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        metadata
+            .get("last_run_completed_output_file")
+            .map(String::as_str),
+        Some("none")
+    );
     assert_ne!(
         metadata.get("failure_context").map(String::as_str),
         Some("none"),
@@ -1535,8 +1569,16 @@ fn benchmark_profile_records_completion_metadata_for_single_mix_run() -> Result<
         Some("success")
     );
     assert_eq!(
+        metadata.get("script_exit_status").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
         metadata.get("script_stage").map(String::as_str),
         Some("complete")
+    );
+    assert_eq!(
+        metadata.get("timeout_probe_exit_final").map(String::as_str),
+        Some("disabled")
     );
     assert_eq!(
         metadata.get("last_run_started_index").map(String::as_str),
@@ -1553,6 +1595,18 @@ fn benchmark_profile_records_completion_metadata_for_single_mix_run() -> Result<
     assert_eq!(
         metadata.get("last_run_completed_label").map(String::as_str),
         Some("resp3:basic:c1:p1:r1")
+    );
+    assert!(
+        metadata
+            .get("last_run_started_output_file")
+            .is_some_and(|value| value.ends_with("/resp3-basic-c1-p1-r1.txt")),
+        "last_run_started_output_file should point to the final run output"
+    );
+    assert!(
+        metadata
+            .get("last_run_completed_output_file")
+            .is_some_and(|value| value.ends_with("/resp3-basic-c1-p1-r1.txt")),
+        "last_run_completed_output_file should point to the final run output"
     );
     assert_eq!(
         metadata.get("failure_context").map(String::as_str),

@@ -1,6 +1,6 @@
 # Next Steps
 Are there important TODO items not yet captured? No.
-Evaluation: No. This iteration added an integration regression test that verifies `scripts/benchmark_profile.sh` writes complete success metadata (`run_completion_state`, run counts, stage, last-run markers, and `failure_context=none`) for a minimal reachable-endpoint run. Meaningful remaining work is still full benchmark execution and reporting.
+Evaluation: No. This iteration strengthened benchmark metadata regression coverage by asserting `script_exit_status` plus started/completed output-file markers for both preflight-failure and successful single-mix runs. Meaningful remaining work is still full benchmark execution and reporting.
 
 - [ ] Rerun `scripts/benchmark_profile.sh` with the default `MIXES` (including `32:1`) and verify timeout-protected runs complete or fail fast with actionable errors plus finalized metadata (`total_runs_completed/remaining`, `run_completion_state`, `script_exit_kind`, `script_stage` with per-run context, `last_run_started_index/label/output_file`, and `last_run_completed_index/label/output_file`).
 - [ ] Publish updated full default-profile baseline vs candidate benchmark deltas after the rerun, including `run-metadata.txt` context with expected/completed run counts.

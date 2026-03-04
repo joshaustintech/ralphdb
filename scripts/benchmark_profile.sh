@@ -530,7 +530,7 @@ run_case() {
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit "${run_status}"
     }
-  else
+  elif [[ "${mode}" == "mset" ]]; then
     run_cmd=("${cmd_base[@]}" MSET bench:k1 v1 bench:k2 v2)
     if ((BENCH_TIMEOUT_ENABLED)); then
       run_cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${run_cmd[@]}")
@@ -540,6 +540,10 @@ run_case() {
       echo "Benchmark failed or timed out for ${proto_name} ${mode} c=${clients} p=${pipeline} repeat=${repeat}" >&2
       exit "${run_status}"
     }
+  else
+    failure_context="benchmark:${last_run_started_label}:invalid-mode:${mode}"
+    echo "Unsupported benchmark mode '${mode}'." >&2
+    exit 1
   fi
 
   COMPLETED_RUNS=$((COMPLETED_RUNS + 1))

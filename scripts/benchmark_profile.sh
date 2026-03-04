@@ -142,40 +142,12 @@ fi
 
 TIMEOUT_BIN=""
 TIMEOUT_PROBE_EXIT=""
-timeout_probe_status=0
-timeout_probe_output=""
 if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
   if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
   else
     TIMEOUT_BIN="gtimeout"
   fi
-
-  timeout_probe_output="$("${TIMEOUT_BIN}" 1 sh -c "sleep 2" 2>&1)" || timeout_probe_status=$?
-  if [[ "${timeout_probe_status}" -eq 0 ]]; then
-    echo "${TIMEOUT_BIN} completed a timeout probe without timing out." >&2
-    echo "Verify ${TIMEOUT_BIN} is functioning correctly or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
-    exit 1
-  fi
-  if [[ "${timeout_probe_status}" -eq 125 || "${timeout_probe_status}" -eq 126 || "${timeout_probe_status}" -eq 127 ]]; then
-    echo "${TIMEOUT_BIN} failed timeout probing with exit ${timeout_probe_status}." >&2
-    if [[ -n "${timeout_probe_output}" ]]; then
-      echo "Probe output: ${timeout_probe_output}" >&2
-    fi
-    echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
-    exit 1
-  fi
-  if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -lt 128 ]]; then
-    echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status}." >&2
-    if [[ -n "${timeout_probe_output}" ]]; then
-      echo "Probe output: ${timeout_probe_output}" >&2
-    fi
-    echo "Expected a timeout status (124 or signal-based >=128)." >&2
-    echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
-    exit 1
-  fi
-  TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
-
 fi
 
 is_timeout_status() {
@@ -215,7 +187,11 @@ metadata_file="${OUT_DIR}/run-metadata.txt"
   echo "protocol_count=${PROTOCOL_COUNT}"
   echo "bench_timeout_seconds=${BENCH_TIMEOUT_SECONDS}"
   echo "timeout_bin=${TIMEOUT_BIN:-disabled}"
-  echo "timeout_probe_exit=${TIMEOUT_PROBE_EXIT:-disabled}"
+  if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+    echo "timeout_probe_exit=pending"
+  else
+    echo "timeout_probe_exit=disabled"
+  fi
   echo "resp3_flag=${RESP3_FLAG}"
   echo "mix_count=${MIX_COUNT}"
   echo "total_runs_expected=${TOTAL_RUNS}"
@@ -295,6 +271,7 @@ finalize_metadata() {
       echo "completion_timestamp=${completion_timestamp}"
       echo "elapsed_seconds=${elapsed_seconds}"
       echo "script_stage=${sanitized_script_stage}"
+      echo "timeout_probe_exit_final=${TIMEOUT_PROBE_EXIT:-disabled}"
       echo "last_run_started_index=${last_run_started_index}"
       echo "last_run_started_label=${sanitized_last_run_started_label}"
       echo "last_run_started_output_file=${sanitized_last_run_started_output_file}"
@@ -307,6 +284,39 @@ finalize_metadata() {
   fi
 }
 trap finalize_metadata EXIT
+
+timeout_probe_status=0
+timeout_probe_output=""
+if ((BENCH_TIMEOUT_SECONDS_NUM > 0)); then
+  script_stage="preflight:timeout_probe"
+  timeout_probe_output="$("${TIMEOUT_BIN}" 1 sh -c "sleep 2" 2>&1)" || timeout_probe_status=$?
+  if [[ "${timeout_probe_status}" -eq 0 ]]; then
+    failure_context="preflight:timeout_probe:unexpected-success"
+    echo "${TIMEOUT_BIN} completed a timeout probe without timing out." >&2
+    echo "Verify ${TIMEOUT_BIN} is functioning correctly or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
+    exit 1
+  fi
+  if [[ "${timeout_probe_status}" -eq 125 || "${timeout_probe_status}" -eq 126 || "${timeout_probe_status}" -eq 127 ]]; then
+    failure_context="preflight:timeout_probe:failure:${timeout_probe_status}"
+    echo "${TIMEOUT_BIN} failed timeout probing with exit ${timeout_probe_status}." >&2
+    if [[ -n "${timeout_probe_output}" ]]; then
+      echo "Probe output: ${timeout_probe_output}" >&2
+    fi
+    echo "Install a working timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
+    exit 1
+  fi
+  if [[ "${timeout_probe_status}" -ne 124 && "${timeout_probe_status}" -lt 128 ]]; then
+    failure_context="preflight:timeout_probe:unexpected-exit:${timeout_probe_status}"
+    echo "${TIMEOUT_BIN} probe ended with unexpected exit ${timeout_probe_status}." >&2
+    if [[ -n "${timeout_probe_output}" ]]; then
+      echo "Probe output: ${timeout_probe_output}" >&2
+    fi
+    echo "Expected a timeout status (124 or signal-based >=128)." >&2
+    echo "Install a compatible timeout tool or set BENCH_TIMEOUT_SECONDS=0 to disable timeouts." >&2
+    exit 1
+  fi
+  TIMEOUT_PROBE_EXIT="${timeout_probe_status}"
+fi
 
 run_cli_preflight_or_report() {
   local preflight_name="$1"

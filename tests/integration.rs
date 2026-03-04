@@ -243,6 +243,37 @@ exit 42
     Ok(())
 }
 
+fn install_fake_timeout(path: &Path) -> Result<()> {
+    let fake = path.join("timeout");
+    let script = r#"#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -lt 2 ]]; then
+  exit 125
+fi
+
+duration="$1"
+shift
+
+if [[ "${1:-}" == "sh" && "${2:-}" == "-c" && "${3:-}" == "sleep 2" ]]; then
+  exit 124
+fi
+
+args=" $* "
+if [[ "${args}" == *"redis-benchmark"* && "${args}" == *" -t set,get,incr "* ]]; then
+  exit 124
+fi
+
+"$@"
+"#;
+
+    fs::write(&fake, script)?;
+    let mut perms = fs::metadata(&fake)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&fake, perms)?;
+    Ok(())
+}
+
 #[test]
 fn tcp_command_flow() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -1803,6 +1834,165 @@ fn benchmark_profile_records_run_failure_context() -> Result<()> {
             .get("failure_context")
             .is_some_and(|value| value.starts_with("benchmark:resp2:basic:c1:p1:r1:failure:42:")),
         "failure_context should preserve benchmark failure details"
+    );
+
+    fs::remove_dir_all(profile_dir)?;
+    fs::remove_dir_all(fake_bin_dir)?;
+    Ok(())
+}
+
+#[test]
+fn benchmark_profile_records_run_timeout_context() -> Result<()> {
+    if !command_exists("redis-cli") || !command_exists("redis-benchmark") {
+        eprintln!(
+            "skipping benchmark metadata integration test because redis-cli/redis-benchmark are unavailable"
+        );
+        return Ok(());
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    listener.set_nonblocking(true)?;
+    let addr = listener.local_addr()?;
+    let storage = Storage::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_signal = Arc::clone(&stop);
+    let server_storage = storage.clone();
+
+    let handle = thread::spawn(move || -> Result<()> {
+        while !stop_signal.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if let Err(error) =
+                        Server::handle_connection(stream, server_storage.clone(), None)
+                    {
+                        if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+                            match io_error.kind() {
+                                ErrorKind::ConnectionReset
+                                | ErrorKind::BrokenPipe
+                                | ErrorKind::UnexpectedEof => {}
+                                _ => return Err(error),
+                            }
+                        } else {
+                            return Err(error);
+                        }
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    });
+
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let label = format!("metadata-run-timeout-{nanos}");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/benchmark_profile.sh");
+    let fake_bin_dir = env::temp_dir().join(format!("ralphdb-fake-timeout-bin-{nanos}"));
+    fs::create_dir_all(&fake_bin_dir)?;
+    install_fake_redis_benchmark(&fake_bin_dir)?;
+    install_fake_timeout(&fake_bin_dir)?;
+    let path_env = match env::var("PATH") {
+        Ok(path) => format!("{}:{path}", fake_bin_dir.display()),
+        Err(_) => fake_bin_dir.display().to_string(),
+    };
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .arg(&label)
+        .current_dir(&repo_root)
+        .env("PATH", path_env)
+        .env("HOST", addr.ip().to_string())
+        .env("PORT", addr.port().to_string())
+        .env("REQUESTS", "1")
+        .env("REPEATS", "1")
+        .env("MIXES", "1:1")
+        .env("MODES", "basic")
+        .env("BENCH_TIMEOUT_SECONDS", "1")
+        .status()?;
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("server thread panicked")?;
+
+    assert!(
+        !status.success(),
+        "benchmark profile should fail when a benchmark run times out"
+    );
+
+    let profile_dir = find_profile_dir_for_label(&label)?;
+    let metadata_path = profile_dir.join("run-metadata.txt");
+    let metadata_contents = fs::read_to_string(&metadata_path)?;
+    let metadata = parse_metadata(&metadata_contents);
+
+    assert_eq!(
+        metadata.get("total_runs_expected").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("total_runs_completed").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        metadata.get("total_runs_remaining").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        metadata.get("run_completion_state").map(String::as_str),
+        Some("incomplete")
+    );
+    assert_eq!(
+        metadata.get("script_exit_kind").map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        metadata.get("script_exit_status").map(String::as_str),
+        Some("124")
+    );
+    assert_eq!(
+        metadata.get("timeout_probe_exit_final").map(String::as_str),
+        Some("124")
+    );
+    assert!(
+        metadata
+            .get("script_stage")
+            .is_some_and(|value| value.starts_with("benchmark:run1of2:resp2:basic:c1:p1:r1")),
+        "script_stage should identify the interrupted run"
+    );
+    assert_eq!(
+        metadata.get("last_run_started_index").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        metadata.get("last_run_started_label").map(String::as_str),
+        Some("resp2:basic:c1:p1:r1")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_index").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_label").map(String::as_str),
+        Some("none")
+    );
+    assert!(
+        metadata
+            .get("last_run_started_output_file")
+            .is_some_and(|value| value.ends_with("/resp2-basic-c1-p1-r1.txt")),
+        "last_run_started_output_file should point to the timed-out run output"
+    );
+    assert_eq!(
+        metadata
+            .get("last_run_completed_output_file")
+            .map(String::as_str),
+        Some("none")
+    );
+    assert!(
+        metadata
+            .get("failure_context")
+            .is_some_and(|value| value.starts_with("benchmark:resp2:basic:c1:p1:r1:timeout:124:")),
+        "failure_context should preserve benchmark timeout details"
     );
 
     fs::remove_dir_all(profile_dir)?;

@@ -401,6 +401,8 @@ run_cli_preflight_or_report() {
   shift
   local status
   local output
+  local attempt=1
+  local max_attempts=2
   local quoted_cmd
   local cmd=(redis-cli --raw -h "${HOST}" -p "${PORT}" "$@")
 
@@ -408,12 +410,29 @@ run_cli_preflight_or_report() {
     cmd=("${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "${cmd[@]}")
   fi
 
-  if output="$("${cmd[@]}" 2>&1)"; then
-    RUN_CLI_PREFLIGHT_OUTPUT="${output}"
-    return 0
-  else
-    status=$?
-  fi
+  while ((attempt <= max_attempts)); do
+    if output="$("${cmd[@]}" 2>&1)"; then
+      RUN_CLI_PREFLIGHT_OUTPUT="${output}"
+      return 0
+    else
+      status=$?
+    fi
+
+    if ((attempt == max_attempts)); then
+      break
+    fi
+
+    # Accept one retry for transient socket teardown races while local servers are warming up.
+    if [[ "${output}" =~ [Cc]onnection[[:space:]]reset ]] ||
+      [[ "${output}" =~ [Bb]roken[[:space:]]pipe ]] ||
+      [[ "${output}" =~ [Uu]nexpected[[:space:]]EOF ]]; then
+      sleep 0.05
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    break
+  done
 
   RUN_CLI_PREFLIGHT_OUTPUT="${output}"
   quoted_cmd="$(printf '%q ' "${cmd[@]}")"

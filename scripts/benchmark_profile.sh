@@ -426,6 +426,8 @@ run_cli_preflight_or_report() {
     if [[ "${output}" =~ [Cc]onnection[[:space:]]reset ]] ||
       [[ "${output}" =~ [Cc]onnection[[:space:]]refused ]] ||
       [[ "${output}" =~ [Cc]onnection[[:space:]]timed[[:space:]]out ]] ||
+      [[ "${output}" =~ [Cc]onnection[[:space:]]closed ]] ||
+      [[ "${output}" =~ [Cc]losed[[:space:]]the[[:space:]]connection ]] ||
       [[ "${output}" =~ [Bb]roken[[:space:]]pipe ]] ||
       [[ "${output}" =~ [Uu]nexpected[[:space:]]EOF ]]; then
       sleep 0.05

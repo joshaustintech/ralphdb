@@ -324,7 +324,7 @@ if [[ "${args}" == *" PING "* ]]; then
   printf '%s\n' "${attempts}" >"${state_file}"
 
   if ((attempts == 1)); then
-    echo "Could not connect to Redis at 127.0.0.1:6379: Connection refused" >&2
+    echo "${REDIS_CLI_PING_FAIL_MESSAGE:-Could not connect to Redis at 127.0.0.1:6379: Connection refused}" >&2
     exit 1
   fi
 
@@ -1558,6 +1558,75 @@ fn benchmark_profile_retries_transient_connectivity_refusal() -> Result<()> {
         ping_attempts.trim(),
         "2",
         "redis-cli preflight PING should run twice when the first attempt is transiently refused"
+    );
+
+    let profile_dir = find_profile_dir_for_label(&label)?;
+    let metadata_path = profile_dir.join("run-metadata.txt");
+    let metadata_contents = fs::read_to_string(&metadata_path)?;
+    let metadata = parse_metadata(&metadata_contents);
+    assert_eq!(
+        metadata.get("run_completion_state").map(String::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        metadata.get("script_exit_kind").map(String::as_str),
+        Some("success")
+    );
+    assert_eq!(
+        metadata.get("failure_context").map(String::as_str),
+        Some("none")
+    );
+
+    fs::remove_dir_all(profile_dir)?;
+    fs::remove_dir_all(fake_bin_dir)?;
+    Ok(())
+}
+
+#[test]
+fn benchmark_profile_retries_transient_connectivity_close() -> Result<()> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let label = format!("metadata-preflight-close-retry-{nanos}");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/benchmark_profile.sh");
+    let fake_bin_dir = env::temp_dir().join(format!("ralphdb-fake-cli-close-retry-bin-{nanos}"));
+    fs::create_dir_all(&fake_bin_dir)?;
+    install_fake_success_redis_benchmark(&fake_bin_dir)?;
+    install_fake_flaky_redis_cli(&fake_bin_dir)?;
+    let ping_state_file = fake_bin_dir.join("redis-cli-ping-attempts.txt");
+    let path_env = match env::var("PATH") {
+        Ok(path) => format!("{}:{path}", fake_bin_dir.display()),
+        Err(_) => fake_bin_dir.display().to_string(),
+    };
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .arg(&label)
+        .current_dir(&repo_root)
+        .env("PATH", path_env)
+        .env("REDIS_CLI_STATE_FILE", &ping_state_file)
+        .env(
+            "REDIS_CLI_PING_FAIL_MESSAGE",
+            "Error: Server closed the connection",
+        )
+        .env("HOST", "127.0.0.1")
+        .env("PORT", "6379")
+        .env("REQUESTS", "1")
+        .env("REPEATS", "1")
+        .env("MIXES", "1:1")
+        .env("MODES", "basic")
+        .env("BENCH_TIMEOUT_SECONDS", "0")
+        .status()?;
+
+    assert!(
+        status.success(),
+        "benchmark profile should retry one transient redis-cli preflight closed-connection error and succeed"
+    );
+
+    let ping_attempts = fs::read_to_string(&ping_state_file)?;
+    assert_eq!(
+        ping_attempts.trim(),
+        "2",
+        "redis-cli preflight PING should run twice when the first attempt reports a transient connection close"
     );
 
     let profile_dir = find_profile_dir_for_label(&label)?;

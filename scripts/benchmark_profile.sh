@@ -424,6 +424,8 @@ run_cli_preflight_or_report() {
 
     # Accept one retry for transient socket teardown races while local servers are warming up.
     if [[ "${output}" =~ [Cc]onnection[[:space:]]reset ]] ||
+      [[ "${output}" =~ [Cc]onnection[[:space:]]refused ]] ||
+      [[ "${output}" =~ [Cc]onnection[[:space:]]timed[[:space:]]out ]] ||
       [[ "${output}" =~ [Bb]roken[[:space:]]pipe ]] ||
       [[ "${output}" =~ [Uu]nexpected[[:space:]]EOF ]]; then
       sleep 0.05

@@ -1757,6 +1757,72 @@ fn benchmark_profile_records_completion_metadata_for_default_profile_shape() -> 
 }
 
 #[test]
+fn benchmark_profile_parses_comma_delimited_mixes_and_modes() -> Result<()> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let label = format!("metadata-comma-parse-{nanos}");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/benchmark_profile.sh");
+    let fake_bin_dir = env::temp_dir().join(format!("ralphdb-fake-comma-parse-bin-{nanos}"));
+    fs::create_dir_all(&fake_bin_dir)?;
+    install_fake_success_redis_benchmark(&fake_bin_dir)?;
+    install_fake_flaky_redis_cli(&fake_bin_dir)?;
+    let ping_state_file = fake_bin_dir.join("redis-cli-ping-attempts.txt");
+    let path_env = match env::var("PATH") {
+        Ok(path) => format!("{}:{path}", fake_bin_dir.display()),
+        Err(_) => fake_bin_dir.display().to_string(),
+    };
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .arg(&label)
+        .current_dir(&repo_root)
+        .env("PATH", path_env)
+        .env("REDIS_CLI_STATE_FILE", &ping_state_file)
+        .env("REQUESTS", "1")
+        .env("REPEATS", "1")
+        .env("MIXES", "1:1, 32:8")
+        .env("MODES", "basic,mset")
+        .env("BENCH_TIMEOUT_SECONDS", "0")
+        .status()?;
+
+    assert!(
+        status.success(),
+        "benchmark profile should parse comma-delimited mixes/modes and complete when synthetic benchmark commands succeed"
+    );
+
+    let profile_dir = find_profile_dir_for_label(&label)?;
+    let metadata_path = profile_dir.join("run-metadata.txt");
+    let metadata_contents = fs::read_to_string(&metadata_path)?;
+    let metadata = parse_metadata(&metadata_contents);
+
+    assert_eq!(metadata.get("mixes").map(String::as_str), Some("1:1 32:8"));
+    assert_eq!(
+        metadata.get("modes").map(String::as_str),
+        Some("basic mset")
+    );
+    assert_eq!(
+        metadata.get("total_runs_expected").map(String::as_str),
+        Some("8")
+    );
+    assert_eq!(
+        metadata.get("total_runs_completed").map(String::as_str),
+        Some("8")
+    );
+    assert_eq!(
+        metadata.get("run_completion_state").map(String::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        metadata.get("last_run_completed_label").map(String::as_str),
+        Some("resp3:mset:c32:p8:r1")
+    );
+
+    fs::remove_dir_all(profile_dir)?;
+    fs::remove_dir_all(fake_bin_dir)?;
+    Ok(())
+}
+
+#[test]
 fn benchmark_profile_records_preflight_failure_context() -> Result<()> {
     if !command_exists("redis-cli") || !command_exists("redis-benchmark") {
         eprintln!(
